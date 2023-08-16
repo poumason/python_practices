@@ -10,14 +10,14 @@ class SubItem:
         pass
 
     def execute(self, text):
-        print(f"from {os.getpid()}, execute")
+        logging.info(f"from {os.getpid()}, execute")
         return
 
     def run(self, count):
         for i in range(0, count):
             process = mp.Process(target=self.execute, args=('',))
             process.start()
-            print(f'{self.name} create new process: {process.pid}')
+            logging.info(f'{self.name} create new process: {process.pid}')
             self.process_list.append(process.pid)
 
-        print(f"{self.name}: {len(self.process_list)}")
+        logging.info(f"{self.name}: {len(self.process_list)}")
