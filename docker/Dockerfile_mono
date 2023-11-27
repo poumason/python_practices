@@ -1,0 +1,9 @@
+FROM ubuntu:20.04
+WORKDIR /app
+COPY ./xsp-4.7.1 /app/xsp-4.7.1
+
+RUN apt update
+RUN apt upgrade
+RUN apt install dirmngr gnupg apt-transport-https ca-certificates software-properties-common -y
+RUN apt install mono-complete -y
+RUN mono --version
