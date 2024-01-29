@@ -68,8 +68,6 @@
 </style>
 <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
 <script>
-
-
     var container = document.getElementById("container");
 
     function refreshToken() {
@@ -83,6 +81,8 @@
             .catch(function (error) {
                 container.innerHTML = `Error`
             });
+
+        console.log("refresh")
     }
 
     function getCookie(name) {

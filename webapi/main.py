@@ -12,6 +12,8 @@ import random
 import base64
 import requests
 
+# https://github.com/duranbe/spotify-fastapi-sample/blob/main/src/main.py
+
 print(os.path.join(os.getcwd(),"webapi","templates"))
 app = FastAPI()
 templates = Jinja2Templates(directory=os.path.join(os.getcwd(),"webapi","templates"))
