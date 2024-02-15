@@ -1,28 +1,20 @@
 version: "3.8"
 
 services:
-  web:
-    build: ../docker/Dockerfile_ap
-    # command: uvicorn app.main:app --reload --workers 1 --host 0.0.0.0 --port 8000
-    # install requirements.txt
-    volumes:
-      - ./src/:/usr/src/app/
+  nats:
+    image: nats:latest
+    hostname: nats
+    command: "--js -m 8222"
     ports:
-      - "8002:8000"
-    environment:
-      - DATABASE_URL=postgresql://hello_fastapi:hello_fastapi@db/hello_fastapi_dev
-    depends_on:
-      - db
-  db:
-    image: postgres:13.1-alpine
-    volumes:
-      - postgres_data:/var/lib/postgresql/data/
-    environment:
-      - POSTGRES_USER=hello_fastapi
-      - POSTGRES_PASSWORD=hello_fastapi
-      - POSTGRES_DB=hello_fastapi_dev
+      - "4222:4222"
+      - "8222:8222"
+  
+  prometheus-nats-exporter:
+    image: natsio/prometheus-nats-exporter
+    hostname: prometheus-nats-exporter
+    command: "-varz http://localhost:8222"
     ports:
-      - "5432:5432"
+      - "7777:7777"
 
   prometheus:
     image: prom/prometheus
@@ -60,6 +52,6 @@ volumes:
 
 networks:
   default: 
-    name: hello_fastapi
+    name: nats
 
 
