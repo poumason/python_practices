@@ -3,16 +3,27 @@ import nats
 from nat_controller import NatController
 
 async def main():
+    stream = "myStream"
     subject = "food"
     controller = NatController()
-    controller.connect("nat://localhost:4222")
-    maxCount = 10
+    connected = await controller.connect("nats://localhost:4222")
+    print(f'connect: {connected}')
 
-    await controller.pull(subject=subject, handler=handleMessage)
-    await controller.flush()
+    subscriber = await controller.pull_subscribe(subject=subject, durable="mySubscriber")
+
     while True:
-        print("listening...")
-        
+        try:
+            msgs = await subscriber.fetch(1)
+            for msg in msgs:
+                await msg.ack()
+                print(f"=== receive message ===\n{msg}\n======")
+            if msgs.count == 0:
+                print("no message in stream")
+                break
+        except Exception as e:
+            print(e)
+            break
+    await controller.close()
 
 async def handleMessage(msg):
     subject = msg.subject

@@ -12,7 +12,7 @@ services:
   prometheus-nats-exporter:
     image: natsio/prometheus-nats-exporter
     hostname: prometheus-nats-exporter
-    command: "-varz http://localhost:8222"
+    command: "-varz http://nats:8222"
     ports:
       - "7777:7777"
 
