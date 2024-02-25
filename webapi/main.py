@@ -5,7 +5,7 @@ import logging
 import os
 from urllib.parse import urlencode
 from fastapi import FastAPI, Response, Request, HTTPException
-from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 import math
 import random
@@ -137,6 +137,13 @@ def refresh_token(request: Request):
 
         return {"access_token": access_token}
 
+
+@app.get("/download")
+def download():
+    file_name = 'attachement.bundle.zip'
+    file_path = os.path.join('../', os.getcwd(), 'output', file_name)
+    print(file_path)
+    return FileResponse(path=file_path, media_type="application/octet-stream", filename=file_name)
 
 if __name__ == "__main__":
     uvicorn.run("main:app", port=5000, log_level="info")
