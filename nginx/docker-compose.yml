@@ -1,0 +1,11 @@
+version: "3"
+
+services:
+  nginx:
+    container_name: nginx
+    build:
+      context: .
+    ports:
+      - "8099:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
