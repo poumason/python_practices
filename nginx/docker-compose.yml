@@ -3,9 +3,11 @@ version: "3"
 services:
   nginx:
     container_name: nginx
-    build:
-      context: .
+    # build:
+    #   context: .
+    image: nginx:1.13.2 
     ports:
       - "8099:80"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./map.json:/etc/nginx/cdm_api.json
