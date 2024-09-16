@@ -1,6 +1,6 @@
 FROM nginx:latest
 
-RUN apt-get update && apt-get install -y spawn-fcgi fcgiwrap \
+RUN apt-get update && apt-get install -y spawn-fcgi fcgiwrap jq \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 
