@@ -20,3 +20,4 @@ md = MarkItDown(mlm_client=client, mlm_model="llama3")
 # test_file = os.path.join(os.getcwd(), 'ai', 'test.jpg')
 result = md.convert(test_file)
 print(result.text_content)
+
