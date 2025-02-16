@@ -1,0 +1,72 @@
+version: '3.8'
+services:
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - 11434:11434
+    volumes:
+      - ./ai_data/code:/code
+      - ./ai_data/ollama/ollama:/root/.ollama
+    container_name: ollama
+    pull_policy: always
+    tty: true
+    restart: always
+    # networks:
+    #   - ollama-docker
+    # 在這裡加入 Fluentd Logging Driver
+    logging:
+      driver: "fluentd"
+      options:
+        # fluentd-address: localhost:24224
+        fluentd-address: localhost:24224
+        tag: ollama
+    # # 為了可以透過 Server localhost 使用 Fluentd 的 Port
+    # extra_hosts:
+    #   - "localhost:host-gateway"
+
+
+  # fluentd:
+  #   # image: fluent/fluentd:v1.7
+  #   image: localhost/fluentd:latest
+  #   container_name: fluentd
+  #   environment:
+  #   #   - FLUENTD_CONF_PATH=./fluent.conf
+  #     - ELASTICSEARCH_HOSTNAME=elasticsearch
+  #     - ELASTICSEARCH_PORT=9200
+  #   # # ports:
+  #   # #   - "24224:24224"
+  #   volumes:
+  #     - ./fluentd.conf:/fluentd/etc/fluentd.conf
+  #   command: ["fluentd", "-c", "/fluentd/etc/fluentd.conf"]
+  #   ports:
+  #     - "24224:24224"
+  #     - "24224:24224/udp"
+  #   # networks:
+  #   #   - ollama-docker
+
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    volumes:
+      - ./ai_data/ollama/open-webui:/app/backend/data
+    depends_on:
+      - ollama
+    ports:
+      - 8099:8080
+    environment:
+      - '/ollama/api=http://ollama:11434/api'
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    restart: unless-stopped
+    # networks:
+    #   - ollama-docker
+
+# networks:
+#   ollama-docker:
+#     external: false
+networks:
+  default:
+    external:
+      name: custom-fluentd_default
+      # external: true

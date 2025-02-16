@@ -35,12 +35,8 @@ services:
     depends_on:
       - elasticsearch
 
-  # app:
-  #   image: todoapi:latest
-  #   environment:
-  #     - ASPNETCORE_ENVIRONMENT=Development
-  #     - ASPNETCORE_URLS=http://+:5000
-  #   ports:
-  #     - "8097:5000"
-  #   volumes:
-  #     - ./logs:/app/NLog
+networks:
+  default:
+    external:
+      name: ai_ollama-docker
+      # external: true
