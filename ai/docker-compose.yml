@@ -24,27 +24,6 @@ services:
     # extra_hosts:
     #   - "localhost:host-gateway"
 
-
-  # fluentd:
-  #   # image: fluent/fluentd:v1.7
-  #   image: localhost/fluentd:latest
-  #   container_name: fluentd
-  #   environment:
-  #   #   - FLUENTD_CONF_PATH=./fluent.conf
-  #     - ELASTICSEARCH_HOSTNAME=elasticsearch
-  #     - ELASTICSEARCH_PORT=9200
-  #   # # ports:
-  #   # #   - "24224:24224"
-  #   volumes:
-  #     - ./fluentd.conf:/fluentd/etc/fluentd.conf
-  #   command: ["fluentd", "-c", "/fluentd/etc/fluentd.conf"]
-  #   ports:
-  #     - "24224:24224"
-  #     - "24224:24224/udp"
-  #   # networks:
-  #   #   - ollama-docker
-
-
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
     container_name: open-webui
