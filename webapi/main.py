@@ -1,4 +1,4 @@
-from prometheus_fastapi_instrumentator import Instrumentator
+# from prometheus_fastapi_instrumentator import Instrumentator
 from fastapi import FastAPI
 import uvicorn
 import logging
@@ -6,7 +6,7 @@ import os
 from urllib.parse import urlencode
 from fastapi import FastAPI, Response, Request, HTTPException
 from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
-from fastapi.templating import Jinja2Templates
+# from fastapi.templating import Jinja2Templates
 import math
 import random
 import base64
@@ -16,8 +16,8 @@ import requests
 
 print(os.path.join(os.getcwd(),"webapi","templates"))
 app = FastAPI()
-templates = Jinja2Templates(directory=os.path.join(os.getcwd(),"webapi","templates"))
-instrumentator = Instrumentator().instrument(app)
+# templates = Jinja2Templates(directory=os.path.join(os.getcwd(),"webapi","templates"))
+# instrumentator = Instrumentator().instrument(app)
 
 STATE_KEY = "spotify_auth_state"
 CLIENT_ID = os.environ["SP_CLIENT_ID"]
@@ -25,9 +25,9 @@ CLIENT_SECRET = os.environ["SP_CLIENT_SECRET"]
 URI = os.environ["SP_URI"]
 REDIRECT_URI = URI + "/callback"
 
-@app.on_event("startup")
-async def _startup():
-    instrumentator.expose(app)
+# @app.on_event("startup")
+# async def _startup():
+#     instrumentator.expose(app)
 
 # @app.get("/")
 # def read_root():
@@ -112,7 +112,8 @@ def callback(request: Request, response: Response):
 @app.get("/", response_class=HTMLResponse)
 def main(request: Request):
 
-    return templates.TemplateResponse("index.html", {"request": request})
+    # return templates.TemplateResponse("index.html", {"request": request})
+    return {"status": "ok"}
 
 
 @app.get("/refresh_token")
@@ -146,5 +147,6 @@ def download():
     return FileResponse(path=file_path, media_type="application/octet-stream", filename=file_name)
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", port=5000, log_level="info")
-                # , host="0.0.0.0")
+    uvicorn.run("main:app", port=5000, log_level="info"
+                , host="0.0.0.0",
+                root_path="/kmapi")
