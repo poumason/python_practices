@@ -136,3 +136,5 @@ data/
 .zip
 
 ai_data/
+
+node_modules/
