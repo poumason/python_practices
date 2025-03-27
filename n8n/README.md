@@ -13,6 +13,9 @@ docker-compose -f docker-compose.yml down
 - first references redis-sentinel folder to start docker-compose for redis sentinel environment.
 - modified docker-compose.yml to external network
 
+## Copy container files
+- default path: `/usr/local/lib/node_modules/n8n/dist`
+
 
 # References
 - [n8n with PostgreSQL and Worker](https://github.com/n8n-io/n8n-hosting/blob/main/docker-compose/withPostgresAndWorker/README.md)
