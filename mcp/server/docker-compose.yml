@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  app:
+    image: localhost/mcp:1.0
+    container_name: mcp_server
+    ports:
+      - "8097:5020"
+
+networks:
+  default:
+    external:
+      # name: redis-sentinel_default
+      name: ai_default

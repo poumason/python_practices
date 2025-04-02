@@ -7,15 +7,17 @@ source .venv/bin/active
 uv add "mcp[cli]" httpx
 uv add mcp anthropic python-dotenv
 ```
+### Note
+the client.py invoke the server.py will be got error message about the FastMCP not be exist in server.py.
+**must installed "mcp[cli]" to fixed the issue.**
+
 
 
 if you want to using openai, must following to install packages, and remove anthropic.
 ```
 uv add openai
 ```
-
-
-test prompt
+### Test
 
 `What are the weather alerts in California?`
 
