@@ -14,12 +14,12 @@ services:
     # networks:
     #   - ollama-docker
     # 在這裡加入 Fluentd Logging Driver
-    logging:
-      driver: "fluentd"
-      options:
-        # fluentd-address: localhost:24224
-        fluentd-address: localhost:24224
-        tag: ollama
+    # logging:
+    #   driver: "fluentd"
+    #   options:
+    #     # fluentd-address: localhost:24224
+    #     fluentd-address: localhost:24224
+    #     tag: ollama
     # # 為了可以透過 Server localhost 使用 Fluentd 的 Port
     # extra_hosts:
     #   - "localhost:host-gateway"
@@ -43,9 +43,10 @@ services:
 
 # networks:
 #   ollama-docker:
-#     external: false
-networks:
-  default:
-    external:
-      name: custom-fluentd_default
-      # external: true
+# #     external: false
+# networks:
+#   default:
+#     external:
+#       name: custom-fluentd_default
+#       # external: true
+#       # name: wrenai_wren

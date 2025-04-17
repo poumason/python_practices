@@ -21,6 +21,10 @@ uv add openai
 
 `What are the weather alerts in California?`
 
+## Note
+when you built up the FastAPI + FastMCP, you must including mcpo for integrated with openai-webui.
+
+
 ## References
 - See the [Building MCP clients](https://modelcontextprotocol.io/tutorials/building-a-client) tutorial for more information.
 - See the [Quickstart](https://modelcontextprotocol.io/quickstart) tutorial for more information.

@@ -8,6 +8,9 @@ services:
       - REDIS_PASSWORD=redispassword
     ports:
       - "6379:6379"
+    networks:
+      - ai_default
+
   redis-slave:
     container_name: slave-redis
     image: 'bitnami/redis:latest'
@@ -20,6 +23,9 @@ services:
       - "7000:6379"
     depends_on:
       - redis-master
+    networks:
+      - ai_default
+
   redis-sentinel-1:
     image: 'bitnami/redis-sentinel:latest'
     container_name: sentinel-1
@@ -33,6 +39,9 @@ services:
       - redis-slave
     ports:
        - "26379:26379"
+    networks:
+      - ai_default
+
   redis-sentinel-2:
     image: 'bitnami/redis-sentinel:latest'
     container_name: sentinel-2
@@ -59,3 +68,10 @@ services:
       - redis-slave
     ports:
       - "26381:26379"
+    networks:
+      - ai_default
+
+networks:
+  ai_default:
+    external:
+      name: ai_default

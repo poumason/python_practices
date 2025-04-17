@@ -1,0 +1,5 @@
+fastapi
+uvicorn[standard]
+requests
+fastapi-mcp
+line-bot-sdk==2.3.0

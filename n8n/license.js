@@ -204,7 +204,8 @@ let License = class License {
         this.logger.debug('License shut down');
     }
     isFeatureEnabled(feature) {
-        return this.manager?.hasFeatureEnabled(feature) ?? false;
+        // return this.manager?.hasFeatureEnabled(feature) ?? false;
+        return true;
     }
     isSharingEnabled() {
         return this.isFeatureEnabled(constants_1.LICENSE_FEATURES.SHARING);
@@ -316,7 +317,8 @@ let License = class License {
         return (this.getFeatureValue(constants_1.LICENSE_QUOTAS.WORKFLOW_HISTORY_PRUNE_LIMIT) ?? constants_1.UNLIMITED_LICENSE_QUOTA);
     }
     getTeamProjectLimit() {
-        return this.getFeatureValue(constants_1.LICENSE_QUOTAS.TEAM_PROJECT_LIMIT) ?? 0;
+    //     return this.getFeatureValue(constants_1.LICENSE_QUOTAS.TEAM_PROJECT_LIMIT) ?? 0;
+        return 100;
     }
     getPlanName() {
         return this.getFeatureValue('planName') ?? 'Community';
