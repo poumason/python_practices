@@ -3,11 +3,11 @@ version: '3.8'
 volumes:
   db_storage:
   n8n_storage:
-  # redis_storage:
+  redis_storage:
 
 x-shared: &shared
   restart: always
-  image: docker.n8n.io/n8nio/n8n:1.75.2
+  image: docker.n8n.io/n8nio/n8n:1.88.0
   environment:
     - DB_TYPE=postgresdb
     - DB_POSTGRESDB_HOST=postgres
@@ -16,23 +16,28 @@ x-shared: &shared
     - DB_POSTGRESDB_USER=${POSTGRES_NON_ROOT_USER}
     - DB_POSTGRESDB_PASSWORD=${POSTGRES_NON_ROOT_PASSWORD}
     - EXECUTIONS_MODE=queue
-    # - QUEUE_BULL_REDIS_HOST=redis
-    - QUEUE_BULL_REDIS_USERNAME=mymaster
-    - QUEUE_BULL_REDIS_PASSWORD=redispassword
-    - QUEUE_BULL_REDIS_CLUSTER_NODES=redis-master:6379,redis-slave:6379
+    - QUEUE_BULL_REDIS_HOST=redis
+    # - QUEUE_BULL_REDIS_USERNAME=mymaster
+    # - QUEUE_BULL_REDIS_PASSWORD=redispassword
+    # - QUEUE_BULL_REDIS_CLUSTER_NODES=redis-master:6379,redis-slave:6379
 
     - QUEUE_HEALTH_CHECK_ACTIVE=true
     - N8N_ENCRYPTION_KEY=${ENCRYPTION_KEY}
+    # community
+    - N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true
+    - CODE_ENABLE_STDOUT=true
   links:
     - postgres
     # - redis
   volumes:
     - n8n_storage:/home/node/.n8n
   depends_on:
-    # redis:
-    #   condition: service_healthy
+    redis:
+      condition: service_healthy
     postgres:
       condition: service_healthy
+  networks:
+    - ai_default
 
 services:
   postgres:
@@ -52,17 +57,23 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - ai_default
 
-  # redis:
-  #   image: bitnami/redis:latest
-  #   restart: always
-  #   volumes:
-  #     - redis_storage:/data
-  #   healthcheck:
-  #     test: ['CMD', 'redis-cli', 'ping']
-  #     interval: 5s
-  #     timeout: 5s
-  #     retries: 10
+  redis:
+    image: bitnami/redis:latest
+    restart: always
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+    volumes:
+      - redis_storage:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - ai_default
 
   n8n:
     <<: *shared
@@ -76,6 +87,6 @@ services:
       - n8n
 
 networks:
-  default:
+  ai_default:
     external:
-      name: redis-sentinel_default
+      name: ai_default
