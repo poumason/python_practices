@@ -1,0 +1,25 @@
+version: "3"
+
+services:
+  chatbox:
+    image: nginx:latest
+    # image: localhost/chatbox:latest
+    container_name: chatbox
+    volumes:
+      - ./dist/renderer:/usr/share/nginx/html
+      - ./app-nginx.conf:/etc/nginx/conf.d/default.conf
+    # command:
+    #   # - npm install serve
+    #   - npm run serve:web
+    ports:
+      - "8101:8080"
+
+  nginx:
+    container_name: nginx
+    image: nginx:latest
+    ports:
+      - "8100:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+    depends_on:
+      - chatbox
