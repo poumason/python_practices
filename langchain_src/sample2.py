@@ -12,6 +12,12 @@ from langchain.schema.output_parser import StrOutputParser
 import asyncio
 from langchain_core.runnables import RunnableParallel, RunnablePassthrough
 
+from langchain_qdrant import QdrantVectorStore
+from qdrant_client import QdrantClient
+from qdrant_client.http.models import Distance, VectorParams
+
+client = QdrantClient(url="http://localhost:6333")
+
 prompt = PromptTemplate(
     template="""You are an assistant for question-answering tasks.
     Use the following documents to answer the question.
@@ -41,7 +47,28 @@ def main():
 
     embeddings = OllamaEmbeddings(model="nomic-embed-text:v1.5",
                                   base_url='http://localhost:11434')
-    vector_store = InMemoryVectorStore.from_documents(pages, embeddings)
+    # vector_store = InMemoryVectorStore.from_documents(pages, embeddings)
+
+    # qdrant
+    # client.create_collection(
+    #     collection_name="demo_collection",
+    #     vectors_config=VectorParams(size=3072, distance=Distance.COSINE),
+    # )
+
+    # vector_store = QdrantVectorStore(
+    #     client=client,
+    #     collection_name="demo_collection",
+    #     embedding=embeddings,
+    # )
+
+    vector_store = QdrantVectorStore.from_documents(
+        pages,
+        embeddings,
+        url='http://localhost:6333',
+        prefer_grpc=True,
+        collection_name="my_documents",
+    )
+
     docs = vector_store.similarity_search("What do jobs about in KKBOX", k=2)
     for doc in docs:
         print(f'Page {doc.metadata["page"]}: {doc.page_content[:300]}\n')
@@ -50,6 +77,7 @@ def main():
     llm = ChatOllama(
         model="deepseek-r1:latest",
         temperature=0,
+        base_url='http://localhost:11434'
     )
 
     # retriever = MultiQueryRetriever.from_llm(
