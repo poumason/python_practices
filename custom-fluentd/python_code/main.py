@@ -14,8 +14,7 @@ def process_log(filename):
     print("Processing:", filename)
 
 
-
-today=datetime.now().strftime('%Y-%m-%d')
+today = datetime.now().strftime('%Y-%m-%d')
 # Get all the log files in the specified directory using glob pattern
 file_pattern = os.path.join(log_directory, f'nlog-transcation-{today}*.log')
 print(os.listdir(log_directory))
@@ -25,7 +24,7 @@ files = glob.glob(file_pattern)
 # files.sort(key=lambda x: int(os.path.splitext(x)[0].split('-')[-1][1:]))
 files.sort()
 
-process_status  = []
+process_status = []
 for item in files:
     file_name = os.path.basename(item)
     print(f"Processing {file_name}")

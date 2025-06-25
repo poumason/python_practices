@@ -138,3 +138,5 @@ data/
 ai_data/
 
 node_modules/
+
+qdrant_storage
