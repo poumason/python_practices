@@ -1,0 +1,3 @@
+# How to use
+- following the [link](https://peter-chang.medium.com/typescript-example-%E6%95%99%E5%AD%B8-tutorial-%E7%AF%84%E4%BE%8B-%E9%96%8B%E7%99%BC-%E6%95%99%E5%AD%B8-%E5%88%9D%E5%AD%B8%E8%80%85-%E7%92%B0%E5%A2%83-nodejs-javascript-react-js-3%E6%AD%A5-888fa8033fc7) to init typescript and node environment.
+- following the [link](https://medium.com/@htyesilyurt/spring-boot-3-redis-sentinel-lettuce-client-and-docker-compose-for-high-availability-1f1e3c372a5a/) to prepare redis and redis sentinel environment

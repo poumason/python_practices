@@ -130,3 +130,13 @@ dmypy.json
 .vscode/
 output/
 logs/
+data/
+
+.DS_Store
+.zip
+
+ai_data/
+
+node_modules/
+
+qdrant_storage

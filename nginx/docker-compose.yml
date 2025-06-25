@@ -1,0 +1,28 @@
+version: "3"
+
+services:
+  nginx:
+    # container_name: nginx
+    # build:
+    #   dockerfile: ./Dockerfile #基於Dockerfile建立image
+    # restart: always
+    # image: nginx:latest
+    image: localhost/nginx:latest
+    # command: ["/bin/sh", "/app/script.sh"]
+    ports:
+      - "8099:80"
+    volumes:
+      # - ./service.sh:/app/service.sh
+      # - ./fcgiwrap.conf:/etc/nginx/fcgiwrap.conf
+      - ./lib:/usr/lib/cgi-bin
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./map.json:/app/map.json
+      # - ./lookup_script.sh:/app/lookup_script.sh
+  ap:
+    image: localhost/ap:latest
+    ports:
+      - "8101:5000"
+    environment:
+      - SP_CLIENT_ID=CLIENT_ID
+      - SP_CLIENT_SECRET=CLIENT_SECRET
+      - SP_URI=https://www.google.com

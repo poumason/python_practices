@@ -1,0 +1,9 @@
+streamlit
+langchain
+langchain_community
+langchain-ollama
+langchain-core
+langchain-text-splitters
+pypdf
+qdrant_client
+langchain-qdrant

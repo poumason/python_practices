@@ -1,0 +1,42 @@
+version: '3'
+services:
+  elasticsearch:
+    image: bitnami/elasticsearch:7.17.24
+    # environment:
+    #   - discovery.type=single-node
+    #   - xpack.security.enabled=false
+    volumes:
+      - ./es_data:/usr/share/elasticsearch/data
+    ports:
+      - 9200:9200
+      - 9300:9300
+
+  kibana:
+    image: bitnami/kibana:7.10.2
+    environment:
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch
+
+  fluentd:
+    image: bitnami/fluentd:1.17.1
+    container_name: fluentd
+    environment:
+      - ELASTICSEARCH_HOSTNAME=elasticsearch
+      - ELASTICSEARCH_PORT=9200
+    volumes:
+      - ./fluentd.conf:/fluentd/etc/fluentd.conf
+    command: ["fluentd", "-c", "/fluentd/etc/fluentd.conf"]
+    ports:
+      - "24224:24224"
+      - "24224:24224/udp"
+    depends_on:
+      - elasticsearch
+
+networks:
+  default:
+    external:
+      name: ai_ollama-docker
+      # external: true

@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  app:
+    image: localhost/mcp:1.0
+    container_name: mcp_server
+    environment:
+      - LINE_TOKEN=
+      - LINE_ROOM=
+    ports:
+      - "8097:5020"
+    volumes:
+      - ./line_server.py:/app/line_server.py
+    networks:
+      - ai_default
+  mcpo:
+    image: ghcr.io/open-webui/mcpo:main
+    container_name: mcpo
+    command: ["--port", "8000", "--api-key", "None", "--server-type", "sse" ,"--", "http://mcp_server:5020/mcp"]
+    ports:
+      - "8098:8000"
+    networks:
+      - ai_default
+    depends_on:
+      - app
+
+
+networks:
+  ai_default:
+    external:
+      name: ai_default

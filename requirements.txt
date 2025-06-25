@@ -1,6 +1,8 @@
-pymongo==3.5.1
-pandas==1.5.3
+# pymongo==3.5.1
+# pandas==1.5.3
 fastapi
 uvicorn[standard]
-prometheus-fastapi-instrumentator==6.0.0 
+# prometheus-fastapi-instrumentator==6.0.0
 requests
+fastapi-mcp
+line-bot-sdk==2.3.0

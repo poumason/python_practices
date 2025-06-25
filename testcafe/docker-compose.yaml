@@ -1,0 +1,11 @@
+version: "3.8"
+
+services:
+  node-chromium:
+    container_name: node-chromium
+    image: node-with-chromium:latest
+    # command: >
+    #   ls -al; mkdir output; chmod -R 777 output; yarn install; yarn screenshot;
+    command: /bin/bash -c "ls -al && yarn install && yarn screenshot;"
+    volumes:
+      - ./:/app

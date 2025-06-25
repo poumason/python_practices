@@ -1,0 +1,8 @@
+assets/
+node_modules/
+coverage/
+.DS_Store/
+.env
+credentials.json
+token.json
+screenshots/

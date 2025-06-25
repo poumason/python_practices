@@ -1,0 +1,18 @@
+services:
+  vllm-cpu:
+    # image: vllm/vllm-openai:v0.8.4
+    image: vllm-cpu-env:latest
+    container_name: vllm-dp-r1
+    restart: always
+    ports:
+      - 8901:8000
+    ipc: host
+    # shm_size: '64gb'
+    privileged: true
+    # entrypoint: python3
+    command: --model deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B --dtype bfloat16
+    # environment:
+    #   - VLLM_CPU_KVCACHE_SPACE
+    #   - VLLM_CPU_OMP_THREADS_BIND
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
