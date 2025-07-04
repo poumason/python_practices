@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ollama
+  template:
+    metadata:
+      labels:
+        app: ollama
+    spec:
+      containers:
+        - name: ollama
+          image: ollama/ollama:latest
+          imagePullPolicy: Never
+          resources:
+            # limits:
+            #   memory: "128Mi"
+            #   cpu: "500m"
+            requests:
+              cpu: 1000m
+              memory: 2Gi
+            limits:
+              cpu: 2000m
+              memory: 3Gi
+          ports:
+            - containerPort: 11434
+          volumeMounts:
+            - name: ollama-persistent-volume #要與volumes 裡面name一樣
+              mountPath: /root/.ollama
+      volumes:
+        - name: ollama-persistent-volume
+          persistentVolumeClaim:
+            claimName: ollama-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama-svc
+spec:
+  selector:
+    app: ollama
+  ports:
+    - protocol: TCP
+      port: 11434
+      targetPort: 11434
+      nodePort: 30000
+  type: NodePort
