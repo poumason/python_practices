@@ -1,0 +1,28 @@
+# helm install my-postgresql-ha bitnami/postgresql-ha --version 15.1.4 --set postgresql.password=postgres --set postgresql.username=postgres
+
+
+# helm install my-litellm unique/litellm --version 1.72.2 --set image.repository=ghcr.io/berriai/litellm --set image.tag=main-stable
+---
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: llm-ingress
+  # annotations:
+  #   nginx.ingress.kubernetes.io/rewrite-target: /$2
+  namespace: llm
+spec:
+  ingressClassName: custom-nginx
+  rules:
+  - http:
+      paths:
+      - path: /litellm
+      # (/|$)(.*)
+        # pathType: ImplementationSpecific
+        pathType: Prefix
+        backend:
+          service:
+            name: litellm-db
+            port:
+              number: 4000

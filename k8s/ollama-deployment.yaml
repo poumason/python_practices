@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: ollama
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: ollama
@@ -15,7 +15,7 @@ spec:
       containers:
         - name: ollama
           image: ollama/ollama:latest
-          imagePullPolicy: Never
+          imagePullPolicy: IfNotPresent
           resources:
             # limits:
             #   memory: "128Mi"
