@@ -38,6 +38,15 @@ spec:
           - --upstream=static://200
           - --http-address=0.0.0.0:4180
           # - --redirect-url=https://dashboard.local/oauth2/callback
+          - --set-authorization-header=true
+          - --pass-authorization-header=true
+          # - --set-authorization-header=true
+          - --set-xauthrequest=true
+          - --pass-access-token=true
+          # - --pass-authorization-header=true
+          - --pass-user-headers=true
+          - --pass-host-header=true
+          # - --set-authorization-header-bearer-token=<dashboard-sa-token>
         env:
           - name: OAUTH2_PROXY_CLIENT_ID
             value: Ov23li1FNyXG1jEiGm6g
@@ -102,6 +111,7 @@ metadata:
     #   proxy_set_header X-Auth-Request-Email $auth_resp_x_auth_request_email;
     nginx.ingress.kubernetes.io/auth-url: "http://oauth2-proxy.kubernetes-dashboard.svc.cluster.local:4180/oauth2/auth"
     nginx.ingress.kubernetes.io/auth-signin: "https://dashboard.local/oauth2/start?rd=$escaped_request_uri"
+    nginx.ingress.kubernetes.io/auth-response-headers: "authorization"
   name: external-auth-oauth2
   namespace: kubernetes-dashboard
 spec:

@@ -1,0 +1,11 @@
+# 添加 kubernetes-dashboard 仓库
+helm repo add kubernetes-dashboard https://kubernetes.github.io/dashboard/
+# 使用 kubernetes-dashboard Chart 部署名为 `kubernetes-dashboard` 的 Helm Release
+helm upgrade --install kubernetes-dashboard kubernetes-dashboard/kubernetes-dashboard --create-namespace --namespace kubernetes-dashboard
+
+
+helm upgrade --install kube-dashboard kubernetes-dashboard/kubernetes-dashboard --create-namespace --namespace kube-dashboard
+
+kubectl -n kubernetes-dashboard port-forward svc/kubernetes-dashboard-kong-proxy 8443:443
+kubectl -n kubernetes-dashboard port-forward svc/kubernetes-dashboard-kong-proxy 8443:443
+kubectl -n kubernetes-dashboard create token admin-user
