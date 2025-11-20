@@ -27,7 +27,7 @@ async def send_message(message: str):
     Args:
         message: text content.
     """
-    token = os.getenv('LINE_TOKE')
+    token = os.getenv('LINE_TOKEN')
     user = os.getenv('LINE_ROOM')
     line_bot_api = LineBotApi(token)
     line_bot_api.push_message(user, TextSendMessage(text=message))

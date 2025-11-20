@@ -140,3 +140,5 @@ ai_data/
 node_modules/
 
 qdrant_storage
+
+helm_registry/
