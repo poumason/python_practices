@@ -9,3 +9,25 @@ helm upgrade --install kube-dashboard kubernetes-dashboard/kubernetes-dashboard 
 kubectl -n kubernetes-dashboard port-forward svc/kubernetes-dashboard-kong-proxy 8443:443
 kubectl -n kubernetes-dashboard port-forward svc/kubernetes-dashboard-kong-proxy 8443:443
 kubectl -n kubernetes-dashboard create token admin-user
+
+# Create admin ServiceAccount
+kubectl create serviceaccount dashboard-admin \
+  -n kubernetes-dashboard
+# Bind the admin role to the ServiceAccount
+kubectl create clusterrolebinding dashboard-admin-binding \
+  --clusterrole=cluster-admin \
+  --serviceaccount=kubernetes-dashboard:dashboard-admin
+# Create a non-expiring token Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dashboard-admin-token
+  namespace: kubernetes-dashboard
+  annotations:
+    kubernetes.io/service-account.name: dashboard-admin
+type: kubernetes.io/service-account-token
+# Get the token (copy once, reuse forever)
+kubectl -n kubernetes-dashboard get secret dashboard-admin-token \
+  -o jsonpath="{.data.token}" | base64 --decode
+
+eyJhbGciOiJSUzI1NiIsImtpZCI6IjZOYnRiVEFzanhtaTIxM293U1lJby1sUE1HSHRiOFh3cVJJOWpjbmxNZUEifQ.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJrdWJlcm5ldGVzLWRhc2hib2FyZCIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VjcmV0Lm5hbWUiOiJkYXNoYm9hcmQtYWRtaW4tdG9rZW4iLCJrdWJlcm5ldGVzLmlvL3NlcnZpY2VhY2NvdW50L3NlcnZpY2UtYWNjb3VudC5uYW1lIjoiZGFzaGJvYXJkLWFkbWluIiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9zZXJ2aWNlLWFjY291bnQudWlkIjoiYzdlNWRmOWEtZjZiZC00YTZhLTg5MmUtODdjN2RlYWE5MzYyIiwic3ViIjoic3lzdGVtOnNlcnZpY2VhY2NvdW50Omt1YmVybmV0ZXMtZGFzaGJvYXJkOmRhc2hib2FyZC1hZG1pbiJ9.I7lW5pGIol83G1MYVio-gID5s6QkjOs5KNV7M-hkXVzdi_uIdXGl7CzBxrmFUwgU_uRO-IluM-v4aCOBsyq2AepPsDlZ5sR6vPdbFNQHRgDYAGgFrqLyhCwja-rJZ_9Rf4j69alXPa20GC7MWDTPWSYotRpxKZjkdbQOffRcewgUUEvbCAmVl87RIfNbIDbn9I5dhWnaXwGmL6iGiMojsN-KXYVeUNZrb6JhUEYXDnteO3UyClUw3IMwK2hhJBJDSzZlZ7AcCUPgxuB3bAROiaCBHcXsBZDNIAtUtgTSbK9L_lNPK_AhqfAKMvV-Vdus2p_xDF2IR_EziADV6lv3kg
