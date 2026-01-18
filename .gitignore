@@ -142,3 +142,5 @@ node_modules/
 qdrant_storage
 
 helm_registry/
+
+es_data/
