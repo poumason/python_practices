@@ -15,7 +15,12 @@ spec:
       initContainers:
         - name: install-docker-cli
           image: docker:dind
-          command: ["cp", "/usr/local/bin/docker", "/data/docker"]
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              cp /usr/local/bin/docker /data/docker
+              cp /usr/local/bin/docker-compose /data/docker-compose
+              chmod +x /data/docker /data/docker-compose
           volumeMounts:
           - name: docker-bin
             mountPath: /data
@@ -33,7 +38,12 @@ spec:
           volumeMounts:
             - name: docker-bin
               mountPath: /usr/local/bin/docker
-              subPath: docker
+              subPath: docker # 只掛載單一檔案到指定路徑
+            - name: docker-bin
+              mountPath: /usr/local/bin/docker-compose
+              subPath: docker-compose # 同樣掛載 compose
+            - name: workspace-volume
+              mountPath: /home/coder/project
         - name: dind
           image: docker:dind
           securityContext:
@@ -41,9 +51,15 @@ spec:
           env:
             - name: DOCKER_TLS_CERTDIR
               value: "" # 內部通訊關閉 TLS 以簡化設定
+          volumeMounts:
+            - name: workspace-volume
+              mountPath: /home/coder/project
       volumes:
         - name: docker-bin
           emptyDir: {}
+        - name: workspace-volume
+          persistentVolumeClaim:
+            claimName: dind-pvc
 ---
 apiVersion: v1
 kind: Service
@@ -55,6 +71,10 @@ spec:
   ports:
     - port: 80
       targetPort: 8080
+      name: http
+    - port: 8180
+      targetPort: 8180
+      name: pgadmin
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -64,16 +84,39 @@ metadata:
     # 這是重點：讓 code-server 的 Websocket 能正常運作
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # 關鍵：將連線路徑重定向為根目錄
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
 spec:
   ingressClassName: nginx
   rules:
   - host: vscode.localhost
     http:
       paths:
-      - path: /
-        pathType: Prefix
+      # - path: /
+      #   pathType: Prefix
+      #   backend:
+      #     service:
+      #       name: vscode-svc
+      #       port:
+      #         number: 80
+      # - path: /test-app # 新增的路徑
+      #   pathType: Prefix
+      #   backend:
+      #     service:
+      #       name: vscode-svc
+      #       port:
+      #         number: 8180
+      - path: /()(.*)  # 對應 code-server
+        pathType: ImplementationSpecific
         backend:
           service:
             name: vscode-svc
             port:
               number: 80
+      - path: /test-app(/|$)(.*) # 對應 pgadmin
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: vscode-svc
+            port:
+              number: 8180
