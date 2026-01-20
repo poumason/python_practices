@@ -1,0 +1,128 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vscode-dind
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vscode-dind
+  template:
+    metadata:
+      labels:
+        app: vscode-dind
+    spec:
+      initContainers:
+        - name: install-docker-cli
+          image: cruizba/ubuntu-dind:jammy-systemd-29.1.4-r0
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              cp /usr/bin/docker /data/docker
+              cp /usr/local/bin/docker-compose /data/docker-compose
+              chmod +x /data/docker /data/docker-compose
+          volumeMounts:
+          - name: docker-bin
+            mountPath: /data
+      containers:
+        - name: code-server
+          image: codercom/code-server:latest
+          args: ["--auth", "password"] # 使用密碼登入，也可設為 none
+          env:
+            - name: PASSWORD
+              value: "admin" # 登入網頁的密碼
+            # - name: DOCKER_HOST
+            #   value: tcp://localhost:2375
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: docker-bin
+              mountPath: /usr/local/bin/docker
+              subPath: docker # 只掛載單一檔案到指定路徑
+            - name: docker-bin
+              mountPath: /usr/local/bin/docker-compose
+              subPath: docker-compose # 同樣掛載 compose
+            - name: docker-socket
+              mountPath: /var/run # 讓 code-server 在這裡找 docker.sock
+            - name: workspace-volume
+              mountPath: /home/coder/project
+        - name: dind
+          image: cruizba/ubuntu-dind:jammy-systemd-29.1.4-r0
+          securityContext:
+            privileged: true # DinD 必須使用特權模式
+          env:
+            - name: DOCKER_TLS_CERTDIR
+              value: "" # 內部通訊關閉 TLS 以簡化設定
+          volumeMounts:
+            - name: workspace-volume
+              mountPath: /home/coder/project
+            - name: docker-socket
+              mountPath: /var/run # dind 產生的 socket 會放在這
+      volumes:
+        - name: docker-bin
+          emptyDir: {}
+        - name: docker-socket # 建立一個共享 Socket 的空間
+          emptyDir: {}
+        - name: workspace-volume
+          persistentVolumeClaim:
+            claimName: dind-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vscode-svc
+spec:
+  selector:
+    app: vscode-dind
+  ports:
+    - port: 80
+      targetPort: 8080
+      name: http
+    - port: 8180
+      targetPort: 8180
+      name: pgadmin
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vscode-ingress
+  annotations:
+    # 這是重點：讓 code-server 的 Websocket 能正常運作
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # 關鍵：將連線路徑重定向為根目錄
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: vscode.localhost
+    http:
+      paths:
+      # - path: /
+      #   pathType: Prefix
+      #   backend:
+      #     service:
+      #       name: vscode-svc
+      #       port:
+      #         number: 80
+      # - path: /test-app # 新增的路徑
+      #   pathType: Prefix
+      #   backend:
+      #     service:
+      #       name: vscode-svc
+      #       port:
+      #         number: 8180
+      - path: /()(.*)  # 對應 code-server
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: vscode-svc
+            port:
+              number: 80
+      - path: /test-app(/|$)(.*) # 對應 pgadmin
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: vscode-svc
+            port:
+              number: 8180
