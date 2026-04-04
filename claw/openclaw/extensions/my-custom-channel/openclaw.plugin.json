@@ -1,0 +1,11 @@
+{
+  "id": "my-custom-channel",
+  "name": "My Custom Webhook Channel",
+  "description": "Receive messages via external HTTP webhooks",
+  "channels": ["custom-webhook"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

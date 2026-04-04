@@ -1,0 +1,7 @@
+mirrors:
+  "ghcr.io":
+    endpoint:
+      - "https://ghcr.io"
+  "registry.k8s.io":
+    endpoint:
+      - "https://ghcr.io"
