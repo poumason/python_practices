@@ -1,4 +1,7 @@
+# cloud
 # https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.13.1/deploy/static/provider/cloud/deploy.yaml
+# kind
+# kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
 apiVersion: v1
 kind: Namespace
 metadata:

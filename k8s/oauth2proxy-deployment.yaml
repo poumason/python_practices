@@ -1,56 +1,52 @@
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  labels:
-    k8s-app: oauth2-proxy
   name: oauth2-proxy
-  namespace: kube-system
+  namespace: kubernetes-dashboard
 spec:
   replicas: 1
   selector:
     matchLabels:
-      k8s-app: oauth2-proxy
+      app: oauth2-proxy
   template:
     metadata:
       labels:
-        k8s-app: oauth2-proxy
+        app: oauth2-proxy
     spec:
       containers:
-      - args:
-        - --provider=github
-        - --email-domain=*
-        # - --upstream=file:///dev/null
-        - --upstream=https://kubernetes-dashboard-kong-proxy.kubernetes-dashboard
+      - name: oauth2-proxy
+        image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
+        # 如果在公司私有環境，記得換成內部 Harbor 的鏡像路徑
+        args:
+        - --provider=oidc
+        - --reverse-proxy=true      # <--- 必加！告訴 Proxy 它在 Ingress 後面
+        - --email-domain=* # 限制特定的 email 網域可輸入公司網域
+        - --upstream=file:///dev/null    # 因為我們是用 Ingress 轉發，這裡設為 null
         - --http-address=0.0.0.0:4180
-        # Register a new application
-        # https://github.com/settings/applications/new
+        - --oidc-issuer-url=https://gitlab.com # 或是公司內部 GitLab 地址
+        - --cookie-secure=false
+        - --whitelist-domain=kubedashboard.localhost # 加入這行
+        - --cookie-refresh=1h
+        - --redirect-url=https://kubedashboard.localhost/oauth2/callback
+        - --set-authorization-header=true
+        - --pass-authorization-header=true
+        - --scope=openid profile email
         env:
         - name: OAUTH2_PROXY_CLIENT_ID
-          value: Ov23li1FNyXG1jEiGm6g
+          value: ""
         - name: OAUTH2_PROXY_CLIENT_SECRET
-          value: 34de5c9b7401ddfbced962360752e3298303b8b3
-        # docker run -ti --rm python:3-alpine python -c 'import secrets,base64; print(base64.b64encode(base64.b64encode(secrets.token_bytes(16))));'
+          value: "gloas-"
         - name: OAUTH2_PROXY_COOKIE_SECRET
-          value: ApLd9UBOd8YwaJcXqn/DJA==
-        # Recommended: remove email-domain=* in args and set an allowlist
-        # - name: OAUTH2_PROXY_GITHUB_USERS
-        #   value: alice,bob
-        image: quay.io/oauth2-proxy/oauth2-proxy:latest
-        imagePullPolicy: Always
-        name: oauth2-proxy
-        ports:
-        - containerPort: 4180
-          protocol: TCP
+          value: "gJRFrVwfN8vJYB178rzdkw=="
+          # value: "ApLd9UBOd8YwaJcXqn/DJA==" # 例如：python -c 'import os,base64; print(base64.b64encode(os.urandom(16)).decode())'
 
 ---
-
 apiVersion: v1
 kind: Service
 metadata:
-  labels:
-    k8s-app: oauth2-proxy
   name: oauth2-proxy
-  namespace: kube-system
+  namespace: kubernetes-dashboard
 spec:
   ports:
   - name: http
@@ -58,19 +54,49 @@ spec:
     protocol: TCP
     targetPort: 4180
   selector:
-    k8s-app: oauth2-proxy
-
+    app: oauth2-proxy
 ---
-
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: oauth2-proxy
-  namespace: kube-system
+  name: kubernetes-dashboard-ingress
+  namespace: kubernetes-dashboard
+  annotations:
+    # 1. 外部認證檢查 URL (指向 Service 的內部 DNS)
+    nginx.ingress.kubernetes.io/auth-url: "http://oauth2-proxy.kubernetes-dashboard.svc.cluster.local:4180/oauth2/auth"
+
+    # 2. 未登入時跳轉的 SSO 登入起始頁面
+    nginx.ingress.kubernetes.io/auth-signin: "https://kubedashboard.localhost/oauth2/start?rd=$scheme://$host$request_uri$is_args$args"
+
+    # 3. 如果 Dashboard 服務本身是 HTTPS (預設通常是)
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    # 將 OAuth2 Proxy 驗證後的 Authorization Header 傳給後端
+    nginx.ingress.kubernetes.io/auth-response-headers: "Authorization"
 spec:
   ingressClassName: nginx
   rules:
-  - http:
+  - host: kubedashboard.localhost
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: kubernetes-dashboard-kong-proxy
+            port:
+              number: 443
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: oauth2-proxy-public
+  namespace: kubernetes-dashboard
+  # 這裡不要放任何 auth-url 或 auth-signin！
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: kubedashboard.localhost
+    http:
       paths:
       - path: /oauth2
         pathType: Prefix
@@ -79,33 +105,17 @@ spec:
             name: oauth2-proxy
             port:
               number: 4180
-  # tls:
-  # - hosts:
-  #   - __INGRESS_HOST__
-  #   secretName: __INGRESS_SECRET__
 
 ---
-
-apiVersion: networking.k8s.io/v1
-kind: Ingress
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
 metadata:
-  annotations:
-    nginx.ingress.kubernetes.io/auth-url: "https://$host/oauth2/auth"
-    nginx.ingress.kubernetes.io/auth-signin: "https://$host/oauth2/start?rd=$escaped_request_uri"
-  name: external-auth-oauth2
-  namespace: kube-system
-spec:
-  ingressClassName: nginx
-  rules:
-  - http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            # name: kubernetes-dashboard
-            name: kubernetes-dashboard-kong-proxy
-            port:
-              number: 80
-              # number: 443
-    # host: __INGRESS_HOST__
+  name: sso-admin-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin # 測試用，給予最大權限
+subjects:
+- kind: User
+  name: "poumason@live.com" # 這裡填寫你 GitLab 帳號的 Email
+  apiGroup: rbac.authorization.k8s.io
