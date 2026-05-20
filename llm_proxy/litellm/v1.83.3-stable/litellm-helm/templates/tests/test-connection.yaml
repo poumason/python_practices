@@ -1,0 +1,31 @@
+---
+# Source: litellm-helm/templates/tests/test-connection.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "release-name-litellm-test-connection"
+  labels:
+    helm.sh/chart: litellm-helm-1.1.0
+    app.kubernetes.io/name: litellm
+    app.kubernetes.io/instance: release-name
+    app.kubernetes.io/version: "v1.80.12"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    "helm.sh/hook": test
+spec:
+  containers:
+    - name: wget
+      image: busybox
+      command: ['sh', '-c']
+      args:
+        - |
+          # Wait for a bit to allow the service to be ready
+          sleep 10
+          # Try multiple times with a delay between attempts
+          for i in $(seq 1 30); do
+            wget -T 5 "release-name-litellm:4000/health/readiness" && exit 0
+            echo "Attempt $i failed, waiting..."
+            sleep 2
+          done
+          exit 1
+  restartPolicy: Never
