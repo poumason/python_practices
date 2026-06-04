@@ -1,0 +1,74 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo-dev
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vscode-ssh-demo
+  namespace: demo-dev
+  labels:
+    app: vscode-ssh-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vscode-ssh-demo
+  template:
+    metadata:
+      labels:
+        app: vscode-ssh-demo
+    spec:
+      containers:
+      - name: code-server
+        image: codercom/code-server:latest
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            echo "==== 開始初始化環境與安裝 SSH ===="
+            sudo apt-get update
+            sudo apt-get install -y openssh-server
+
+            # 建立 sshd 執行所需的目錄
+            sudo mkdir -p /var/run/sshd
+
+            # 設定密碼（使用者:密碼）這裡設為 Demo8888
+            echo 'coder:Demo8888' | sudo chpasswd
+
+            # 修改 SSH 設定允許密碼登入
+            sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+            sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+
+            # 產生主機金鑰
+            sudo ssh-keygen -A
+
+            # 背景啟動 SSH 服務
+            sudo /usr/sbin/sshd
+            echo "==== SSH 服務已在背景啟動 (Port 22) ===="
+
+            # 啟動原本的 code-server 瀏覽器服務（維持 Pod 運行）
+            /usr/bin/entrypoint.sh --bind-addr 0.0.0.0:8080 .
+        ports:
+        - containerPort: 22
+          name: ssh
+        - containerPort: 8080
+          name: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vscode-ssh-svc
+  namespace: demo-dev
+spec:
+  type: ClusterIP
+  ports:
+  - port: 22
+    targetPort: 22
+    name: ssh
+  - port: 80
+    targetPort: 8080
+    name: http
+  selector:
+    app: vscode-ssh-demo
