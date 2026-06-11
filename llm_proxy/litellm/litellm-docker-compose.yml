@@ -1,11 +1,14 @@
 services:
   litellm:
     image: docker.litellm.ai/berriai/litellm:main-stable
+    # image: localhost/litellm:latest
     container_name: litellm_proxy
     #########################################
     ## Uncomment these lines to start proxy with a config.yaml file ##
     volumes:
      - ./litellm_config.yaml:/app/config.yaml
+     # 2. 掛載你的 Custom Logger 腳本到 /app 目錄下
+    #  - ./flatten_mcp.py:/app/flatten_mcp.py
     command:
      - "--config=/app/config.yaml"
     ##############################################
@@ -14,10 +17,20 @@ services:
     environment:
       DATABASE_URL: "postgresql://llmproxy:dbpassword9090@db:5432/litellm"
       STORE_MODEL_IN_DB: "True" # allows adding models to proxy via UI
+      # 3. 【關鍵】告訴 Python 去 /app 目錄下尋找模組
+      # PYTHONPATH: "/app"
+      # LITELLM_LOG: "DEBUG"
+      REDIS_SENTINEL_NODES: '[["sentinel-1", 26379], ["sentinel-2", 26379], ["sentinel-3", 26379]]'
+      REDIS_SERVICE_NAME: "mymaster"
+      REDIS_SENTINEL_PASSWORD: "redis1234"
+      REDIS_PASSWORD: "redis1234"
     env_file:
       - .env # Load local .env file
     depends_on:
       - db  # Indicates that this service depends on the 'db' service, ensuring 'db' starts first
+    networks:
+      - default
+      - redis-net
     healthcheck:  # Defines the health check configuration for the container
       test:
         - CMD-SHELL
@@ -63,3 +76,8 @@ volumes:
     driver: local
   postgres_data:
     name: litellm_postgres_data # Named volume for Postgres data persistence
+
+networks:
+  redis-net:
+    external: true
+    name: redis-sentinel_redis-net

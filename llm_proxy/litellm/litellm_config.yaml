@@ -17,5 +17,9 @@ model_list:
       api_base: http://host.docker.internal:11434
 
 litellm_settings:
-  callbacks: flatten_mcp.proxy_handler_instance
+  cache: true
+  cache_params: # set cache params for redis
+    type: redis # type of cache to initialize (options: "local", "redis", "s3", "gcs")
+
+  # callbacks: flatten_mcp.proxy_handler_instance
 #     drop_params: true
