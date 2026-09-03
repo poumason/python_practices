@@ -1,0 +1,36 @@
+---
+# Admin: specific emails get full cluster-admin. "User" here matches the
+# `email` claim from GitLab's ID token, per --oidc-username-claim=email on
+# kube-apiserver (00-kind-config.yaml). Add more emails as extra subjects to
+# grant more admins.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dashboard-admin-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: User
+  name: "poumason@live.com"
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Viewer: anyone else who successfully authenticates (i.e. anyone in
+# oauth2-proxy's authenticated-emails.txt allowlist) automatically belongs to
+# the built-in "system:authenticated" group and gets the built-in read-only
+# "view" ClusterRole. "view" already excludes Secrets, which is the right
+# default for a non-admin.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dashboard-viewer-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+- kind: Group
+  name: system:authenticated
+  apiGroup: rbac.authorization.k8s.io

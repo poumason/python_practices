@@ -1,0 +1,106 @@
+---
+# Allowlist of emails permitted to LOG IN at all. This does not grant admin —
+# it only controls who can reach the dashboard; RBAC (03-rbac.yaml) decides
+# whether a logged-in user is admin or read-only.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oauth2-proxy-emails
+  namespace: kubernetes-dashboard
+data:
+  authenticated-emails.txt: |
+    poumason@live.com
+
+---
+# GitLab OAuth Application credentials + cookie secret.
+# Create the app at: https://gitlab.com/-/profile/applications
+#   Redirect URI: https://kubedashboard.localhost/oauth2/callback
+#   Scopes: openid, profile, email
+# Generate the cookie secret with:
+#   python3 -c "import secrets,base64; print(base64.b64encode(secrets.token_bytes(16)).decode())"
+apiVersion: v1
+kind: Secret
+metadata:
+  name: oauth2-proxy-secret
+  namespace: kubernetes-dashboard
+type: Opaque
+stringData:
+  client-id: "REPLACE_WITH_GITLAB_APPLICATION_ID"
+  client-secret: "REPLACE_WITH_GITLAB_APPLICATION_SECRET"
+  cookie-secret: "REPLACE_WITH_BASE64_16BYTES_SECRET"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oauth2-proxy
+  namespace: kubernetes-dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: oauth2-proxy
+  template:
+    metadata:
+      labels:
+        app: oauth2-proxy
+    spec:
+      containers:
+      - name: oauth2-proxy
+        image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
+        args:
+        - --provider=oidc
+        - --reverse-proxy=true
+        - --upstream=file:///dev/null
+        - --http-address=0.0.0.0:4180
+        - --oidc-issuer-url=https://gitlab.com
+        - --cookie-secure=true
+        - --cookie-expire=8h
+        - --cookie-refresh=55m
+        - --whitelist-domain=kubedashboard.localhost
+        - --redirect-url=https://kubedashboard.localhost/oauth2/callback
+        - --scope=openid profile email
+        - --authenticated-emails-file=/etc/oauth2-proxy/authenticated-emails.txt
+        # Sets the Authorization header on the /oauth2/auth response so nginx's
+        # auth-response-headers can copy the user's own ID token through to the
+        # dashboard — this is what makes per-user RBAC possible instead of a
+        # shared static admin token.
+        - --set-authorization-header=true
+        env:
+        - name: OAUTH2_PROXY_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: oauth2-proxy-secret
+              key: client-id
+        - name: OAUTH2_PROXY_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: oauth2-proxy-secret
+              key: client-secret
+        - name: OAUTH2_PROXY_COOKIE_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: oauth2-proxy-secret
+              key: cookie-secret
+        volumeMounts:
+        - name: emails
+          mountPath: /etc/oauth2-proxy
+      volumes:
+      - name: emails
+        configMap:
+          name: oauth2-proxy-emails
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oauth2-proxy
+  namespace: kubernetes-dashboard
+spec:
+  ports:
+  - name: http
+    port: 4180
+    protocol: TCP
+    targetPort: 4180
+  selector:
+    app: oauth2-proxy

@@ -1,0 +1,54 @@
+---
+# Public /oauth2 path — handled by oauth2-proxy (no auth annotation here to avoid a redirect loop)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: oauth2-proxy-public
+  namespace: kubernetes-dashboard
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: kubedashboard.localhost
+    http:
+      paths:
+      - path: /oauth2
+        pathType: Prefix
+        backend:
+          service:
+            name: oauth2-proxy
+            port:
+              number: 4180
+
+---
+# Protected dashboard — nginx checks auth with oauth2-proxy, then copies the
+# user's own ID token (set on the auth response by --set-authorization-header)
+# into the request forwarded to the dashboard via auth-response-headers.
+#
+# Deliberately NOT injecting a static admin service-account token here (unlike
+# k8s/oidc_k8s/04-ingress.yaml and k8s/oauth2proxy-deployment.yaml) — that
+# approach gives every logged-in user the same identity and makes per-email
+# RBAC impossible. Forwarding each user's own token lets kube-apiserver (via
+# its --oidc-* flags) and RBAC (03-rbac.yaml) decide admin vs. read-only.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kubernetes-dashboard-ingress
+  namespace: kubernetes-dashboard
+  annotations:
+    nginx.ingress.kubernetes.io/auth-url: "http://oauth2-proxy.kubernetes-dashboard.svc.cluster.local:4180/oauth2/auth"
+    nginx.ingress.kubernetes.io/auth-signin: "https://kubedashboard.localhost/oauth2/start?rd=$scheme://$host$request_uri$is_args$args"
+    nginx.ingress.kubernetes.io/auth-response-headers: "Authorization"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: kubedashboard.localhost
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: kubernetes-dashboard-kong-proxy
+            port:
+              number: 443

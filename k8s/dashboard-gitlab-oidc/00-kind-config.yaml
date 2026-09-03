@@ -1,0 +1,21 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+- role: control-plane
+  kubeadmConfigPatches:
+  - |
+    kind: ClusterConfiguration
+    apiServer:
+      extraArgs:
+        # Trust GitLab.com's OIDC issuer directly (no Dex broker in this setup).
+        # GitLab.com uses a publicly-trusted CA cert, so no oidc-ca-file is needed.
+        oidc-issuer-url: "https://gitlab.com"
+        oidc-client-id: "REPLACE_WITH_GITLAB_APPLICATION_ID"
+        oidc-username-claim: "email"
+  extraPortMappings:
+  - containerPort: 80
+    hostPort: 80
+    protocol: TCP
+  - containerPort: 443
+    hostPort: 443
+    protocol: TCP
