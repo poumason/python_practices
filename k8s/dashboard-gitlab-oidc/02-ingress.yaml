@@ -39,6 +39,12 @@ metadata:
     nginx.ingress.kubernetes.io/auth-signin: "https://kubedashboard.localhost/oauth2/start?rd=$scheme://$host$request_uri$is_args$args"
     nginx.ingress.kubernetes.io/auth-response-headers: "Authorization"
     nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    # The GitLab ID token forwarded via auth-response-headers is a full JWT
+    # (often 1-3KB+), bigger than nginx's default proxy_buffer_size (4k/8k).
+    # Without this, nginx logs "upstream sent too big header while reading
+    # response header from upstream ... subrequest: /oauth2/auth" and the
+    # auth check fails. Bump further (e.g. "32k") if the warning persists.
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
 spec:
   ingressClassName: nginx
   rules:
