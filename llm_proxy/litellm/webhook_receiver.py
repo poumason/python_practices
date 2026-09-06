@@ -136,7 +136,7 @@ async def receive_webhook(request: Request) -> JSONResponse:
     except Exception as exc:
         logger.error("Failed to parse webhook body: %s", exc)
         raise HTTPException(status_code=400, detail="Invalid JSON body")
-
+    print(json.dumps(body, indent=2, default=str))
     logger.debug("Raw webhook payload:\n%s", json.dumps(body, indent=2, default=str))
 
     # Extract the inner webhook_event if present (LiteLLM wraps it)
