@@ -66,6 +66,11 @@ spec:
         # dashboard — this is what makes per-user RBAC possible instead of a
         # shared static admin token.
         - --set-authorization-header=true
+        # Store session data (ID/refresh tokens) in Redis (see 01-redis.yaml)
+        # instead of a browser cookie — keeps the cookie small and avoids
+        # oauth2-proxy's cookie chunking.
+        - --session-store-type=redis
+        - --redis-connection-url=redis://redis.kubernetes-dashboard.svc.cluster.local:6379
         env:
         - name: OAUTH2_PROXY_CLIENT_ID
           valueFrom:
@@ -82,6 +87,11 @@ spec:
             secretKeyRef:
               name: oauth2-proxy-secret
               key: cookie-secret
+        - name: OAUTH2_PROXY_REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-secret
+              key: password
         volumeMounts:
         - name: emails
           mountPath: /etc/oauth2-proxy

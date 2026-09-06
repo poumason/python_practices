@@ -54,6 +54,11 @@ Generate the cookie secret and fill it in too:
 python3 -c "import secrets,base64; print(base64.b64encode(secrets.token_bytes(16)).decode())"
 ```
 
+Also generate the Redis password for `01-redis.yaml`'s `redis-secret`:
+```bash
+python3 -c "import secrets; print(secrets.token_urlsafe(24))"
+```
+
 ### 2. Point kube-apiserver at GitLab's OIDC issuer
 
 **Option A — local kind cluster (new):**
@@ -107,9 +112,10 @@ helm upgrade --install kubernetes-dashboard kubernetes-dashboard/kubernetes-dash
   --create-namespace --namespace kubernetes-dashboard
 ```
 
-### 5. Apply oauth2-proxy, ingress, and RBAC
+### 5. Apply Redis, oauth2-proxy, ingress, and RBAC
 
 ```bash
+kubectl apply -f k8s/dashboard-gitlab-oidc/01-redis.yaml
 kubectl apply -f k8s/dashboard-gitlab-oidc/01-oauth2proxy.yaml
 kubectl apply -f k8s/dashboard-gitlab-oidc/02-ingress.yaml
 kubectl apply -f k8s/dashboard-gitlab-oidc/03-rbac.yaml
@@ -148,3 +154,4 @@ kubectl auth can-i --list --as=someone-else@example.com
 | Non-admin user CAN create/delete resources | `dashboard-viewer-binding` was probably not applied, or another binding (e.g. from `../oidc_k8s/` or `../rbac-deployment.yaml`) is still active in the cluster — check `kubectl get clusterrolebindings` for stray bindings |
 | GitLab redirects to wrong URL | Verify the GitLab OAuth app's Redirect URI is exactly `https://kubedashboard.localhost/oauth2/callback` |
 | nginx logs `upstream sent too big header ... subrequest: "/oauth2/auth"` | The GitLab ID token in the `Authorization` header is bigger than nginx's default `proxy_buffer_size`. `02-ingress.yaml` already sets `proxy-buffer-size: "16k"` on `kubernetes-dashboard-ingress` — bump it to `32k` if the warning persists |
+| oauth2-proxy: `dial tcp: lookup redis ... no such host` or `NOAUTH Authentication required` | `01-redis.yaml` wasn't applied yet, or `redis-secret`'s password wasn't filled in / doesn't match what oauth2-proxy is using — confirm `redis` pod is `Running` in `kubernetes-dashboard` namespace and `OAUTH2_PROXY_REDIS_PASSWORD` matches `redis-secret` |
