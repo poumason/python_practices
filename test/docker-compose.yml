@@ -1,0 +1,57 @@
+services:
+
+  drawio:
+    image: jgraph/drawio:latest
+    container_name: drawio
+    restart: unless-stopped
+    networks:
+      - drawio-net
+
+  # WebDAV: draw.io 直接寫檔到這裡，不用 localStorage
+  webdav:
+    image: httpd:2.4
+    container_name: drawio-webdav
+    restart: unless-stopped
+    volumes:
+      - ./data:/var/webdav                        # 共享圖檔目錄
+      - ./webdav/httpd-webdav.conf:/usr/local/apache2/conf/extra/httpd-webdav.conf:ro
+    command: >
+      sh -c "
+        echo 'Include conf/extra/httpd-webdav.conf' >> /usr/local/apache2/conf/httpd.conf &&
+        echo 'LoadModule rewrite_module modules/mod_rewrite.so' >> /usr/local/apache2/conf/httpd.conf &&
+        chmod 777 /var/webdav &&
+        httpd-foreground
+      "
+    networks:
+      - drawio-net
+
+  # FileBrowser: 網頁版檔案管理，瀏覽/下載 .drawio 檔案
+  filebrowser:
+    image: filebrowser/filebrowser:latest
+    container_name: drawio-files
+    restart: unless-stopped
+    volumes:
+      - ./data:/srv                               # 和 WebDAV 共用同一目錄
+      - ./filebrowser/filebrowser.db:/database/filebrowser.db
+      - ./filebrowser/settings.json:/.filebrowser.json
+    networks:
+      - drawio-net
+
+  nginx:
+    image: nginx:alpine
+    container_name: drawio-nginx
+    restart: unless-stopped
+    ports:
+      - "8089:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - drawio
+      - webdav
+      - filebrowser
+    networks:
+      - drawio-net
+
+networks:
+  drawio-net:
+    driver: bridge
