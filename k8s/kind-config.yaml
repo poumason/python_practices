@@ -9,7 +9,7 @@ nodes:
       extraArgs:
         # --- OIDC 設定：讓 K8s 認識 GitLab ---
         oidc-issuer-url: "https://gitlab.com"
-        oidc-client-id: ""
+        oidc-client-id: "8804a714b9f0a8ba58d0f58d22179cae34ffa2b66a7dcf4660b0a4ffe7204299"
         oidc-username-claim: "email"
         # oidc-groups-claim: "groups"
     # kind: InitConfiguration

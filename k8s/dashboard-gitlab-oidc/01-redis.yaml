@@ -17,7 +17,7 @@ metadata:
 type: Opaque
 stringData:
   # Generate with: python3 -c "import secrets; print(secrets.token_urlsafe(24))"
-  password: "REPLACE_WITH_RANDOM_PASSWORD"
+  password: "12345678"
 
 ---
 apiVersion: apps/v1

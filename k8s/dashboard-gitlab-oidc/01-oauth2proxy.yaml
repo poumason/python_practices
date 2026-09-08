@@ -56,11 +56,24 @@ spec:
         - --oidc-issuer-url=https://gitlab.com
         - --cookie-secure=true
         - --cookie-expire=30m
-        - --cookie-refresh=10m
+        # GitLab's ID token lives only ~10-12m. Refreshing every 10m left a
+        # gap right at the edge where the old token had already expired but
+        # the new one hadn't landed yet, causing kube-apiserver to reject the
+        # forwarded token with 401 ("oidc: token is expired") even though
+        # oauth2-proxy's own session check kept passing. 2m leaves enough
+        # margin to refresh well before each token's expiry.
+        - --cookie-refresh=2m
         - --whitelist-domain=kubedashboard.localhost
         - --redirect-url=https://kubedashboard.localhost/oauth2/callback
         - --scope=openid profile email
         - --authenticated-emails-file=/etc/oauth2-proxy/authenticated-emails.txt
+        # GitLab's ID token has no "groups" claim, so oauth2-proxy falls back
+        # to calling GitLab's profile/userinfo endpoint to look for one on
+        # every login — which 401s ("could not get claim \"groups\": ...
+        # unexpected status 401"), blocking the OAuth callback entirely. We
+        # don't use OIDC groups for RBAC (see 03-rbac.yaml, email + built-in
+        # system:authenticated group), so just skip that lookup.
+        - --skip-claims-from-profile-url=true
         # Sets the Authorization header on the /oauth2/auth response so nginx's
         # auth-response-headers can copy the user's own ID token through to the
         # dashboard — this is what makes per-user RBAC possible instead of a
