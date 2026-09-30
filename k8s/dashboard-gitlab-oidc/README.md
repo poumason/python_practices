@@ -119,6 +119,7 @@ kubectl apply -f k8s/dashboard-gitlab-oidc/01-redis.yaml
 kubectl apply -f k8s/dashboard-gitlab-oidc/01-oauth2proxy.yaml
 kubectl apply -f k8s/dashboard-gitlab-oidc/02-ingress.yaml
 kubectl apply -f k8s/dashboard-gitlab-oidc/03-rbac.yaml
+kubectl apply -f k8s/dashboard-gitlab-oidc/04-viewer-nodes-rbac.yaml
 ```
 
 ### 6. Open the dashboard
@@ -143,6 +144,32 @@ kubectl auth can-i --list --as=someone-else@example.com
 
 ---
 
+## Known limitation: losing your place on a forced re-login
+
+Dashboard is a hash-routed SPA (e.g. `.../#!/pod?namespace=foo`). The part of
+the URL after `#` is never sent to any server by the browser — it's purely
+client-side. So when a token expires mid-session and you F5 to trigger a
+fresh oauth2-proxy → GitLab → oauth2-proxy login round-trip, none of
+nginx/oauth2-proxy/GitLab can see or carry that hash through, and you land
+back on the default route/namespace no matter what.
+
+The only real fix is client-side JS injected into the page (e.g. via nginx
+`sub_filter`, saving the hash to `sessionStorage` on change and restoring it
+on load). That requires the `nginx.ingress.kubernetes.io/configuration-snippet`
+annotation, which **is disabled by policy on the company's ingress-nginx** —
+its admission webhook rejects the ingress outright ("Snippet directives are
+disabled by the Ingress administrator"). A pod-level fix (patching Dashboard's
+static `index.html` via a mounted ConfigMap, bypassing ingress entirely) is
+possible but couples to Dashboard's internal file layout and needs
+re-verifying on every Dashboard upgrade.
+
+**Decision: leave this as-is.** `01-oauth2proxy.yaml`'s `--cookie-refresh=2m`
+already makes forced re-logins rare; when one does happen, re-selecting the
+namespace is a minor one-time inconvenience, not worth the added maintenance
+cost of a pod-level HTML patch.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Fix |
@@ -151,6 +178,7 @@ kubectl auth can-i --list --as=someone-else@example.com
 | oauth2-proxy: `failed to fetch OIDC configuration` | Check the pod has outbound internet access to reach `https://gitlab.com/.well-known/openid-configuration` |
 | Dashboard shows blank / redirects to its own login page | `auth-response-headers: Authorization` missing or oauth2-proxy not returning `--set-authorization-header=true` — the dashboard needs the `Authorization` header forwarded through, not a redirect |
 | Non-admin user gets 403 on view/list actions too | RBAC propagation can take a few seconds after applying `03-rbac.yaml`; also confirm the email is in both `authenticated-emails.txt` (to log in) and check `kubectl auth can-i --list --as=<email>` |
+| Non-admin user can see pods/deployments/etc. fine but Dashboard's Nodes page is empty/forbidden | Expected — the built-in `view` ClusterRole doesn't cover cluster-scoped resources (`nodes`, `persistentvolumes`, `storageclasses`, ...). `04-viewer-nodes-rbac.yaml` adds `nodes` read access on top; if the same thing happens for PVs/StorageClasses, add another ClusterRole+Binding there following the same pattern |
 | Non-admin user CAN create/delete resources | `dashboard-viewer-binding` was probably not applied, or another binding (e.g. from `../oidc_k8s/` or `../rbac-deployment.yaml`) is still active in the cluster — check `kubectl get clusterrolebindings` for stray bindings |
 | GitLab redirects to wrong URL | Verify the GitLab OAuth app's Redirect URI is exactly `https://kubedashboard.localhost/oauth2/callback` |
 | nginx logs `upstream sent too big header ... subrequest: "/oauth2/auth"` | The GitLab ID token in the `Authorization` header is bigger than nginx's default `proxy_buffer_size`. `02-ingress.yaml` already sets `proxy-buffer-size: "16k"` on `kubernetes-dashboard-ingress` — bump it to `32k` if the warning persists |

@@ -1,7 +1,9 @@
 ---
-# Allowlist of emails permitted to LOG IN at all. This does not grant admin —
-# it only controls who can reach the dashboard; RBAC (03-rbac.yaml) decides
-# whether a logged-in user is admin or read-only.
+# Allowlist of emails permitted to LOG IN at all. oauth2-proxy is now purely
+# a gate — anyone on this list who logs in gets forwarded to the Dashboard as
+# the SAME static cluster-admin identity (see 05-static-auth-injector.yaml).
+# There's no per-user admin/viewer split anymore; add/remove emails here to
+# control who can reach the Dashboard at all.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -56,12 +58,10 @@ spec:
         - --oidc-issuer-url=https://gitlab.com
         - --cookie-secure=true
         - --cookie-expire=30m
-        # GitLab's ID token lives only ~10-12m. Refreshing every 10m left a
-        # gap right at the edge where the old token had already expired but
-        # the new one hadn't landed yet, causing kube-apiserver to reject the
-        # forwarded token with 401 ("oidc: token is expired") even though
-        # oauth2-proxy's own session check kept passing. 2m leaves enough
-        # margin to refresh well before each token's expiry.
+        # No longer critical for downstream token freshness (we forward a
+        # static token now, not oauth2-proxy's own session token — see
+        # 05-static-auth-injector.yaml) — this just keeps oauth2-proxy's own
+        # login session refreshed against GitLab within cookie-expire.
         - --cookie-refresh=2m
         - --whitelist-domain=kubedashboard.localhost
         - --redirect-url=https://kubedashboard.localhost/oauth2/callback
@@ -74,11 +74,6 @@ spec:
         # don't use OIDC groups for RBAC (see 03-rbac.yaml, email + built-in
         # system:authenticated group), so just skip that lookup.
         - --skip-claims-from-profile-url=true
-        # Sets the Authorization header on the /oauth2/auth response so nginx's
-        # auth-response-headers can copy the user's own ID token through to the
-        # dashboard — this is what makes per-user RBAC possible instead of a
-        # shared static admin token.
-        - --set-authorization-header=true
         # Store session data (ID/refresh tokens) in Redis (see 01-redis.yaml)
         # instead of a browser cookie — keeps the cookie small and avoids
         # oauth2-proxy's cookie chunking.

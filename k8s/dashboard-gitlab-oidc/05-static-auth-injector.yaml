@@ -1,0 +1,130 @@
+---
+# Decision (2026-09): stop forwarding each user's own GitLab ID token to
+# kube-apiserver — it kept expiring mid-session (see README's "Logged-in
+# session randomly 401s" entry) even after tightening --cookie-refresh.
+# Instead, every email that passes oauth2-proxy's allowlist now reaches the
+# Dashboard/API server as the SAME static, non-expiring identity below.
+# oauth2-proxy's job shrinks to just "is this email allowed in at all" — it
+# no longer needs to hand out its own session token to anything downstream.
+#
+# This means per-user admin/viewer differentiation (03-rbac.yaml,
+# 04-viewer-nodes-rbac.yaml) no longer applies to anyone going through this
+# path — those bindings are left in place, unused, in case this gets
+# reverted later.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dashboard-static-admin
+  namespace: kubernetes-dashboard
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dashboard-static-admin-token
+  namespace: kubernetes-dashboard
+  annotations:
+    kubernetes.io/service-account.name: dashboard-static-admin
+type: kubernetes.io/service-account-token
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dashboard-static-admin-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: dashboard-static-admin
+  namespace: kubernetes-dashboard
+
+---
+# Sits between nginx's auth-url check and oauth2-proxy. Not an Ingress
+# resource, so ingress-nginx's "no configuration-snippet" admission policy
+# doesn't apply to it at all — this is just an ordinary Deployment running
+# its own nginx.conf that we fully own.
+#
+# Flow: nginx ingress -> this service's /auth -> (internally) oauth2-proxy's
+# /oauth2/auth, reusing its existing email-allowlist check. If oauth2-proxy
+# says yes (2xx), this response also carries a fixed
+# "Authorization: Bearer <static SA token>" header. nginx-ingress's
+# auth-response-headers annotation (a plain annotation, not a snippet) then
+# copies that header into the request it forwards to the real Dashboard
+# backend — same mechanism as before, just a static token instead of each
+# user's own expiring one.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-auth-injector-conf
+  namespace: kubernetes-dashboard
+data:
+  default.conf.template: |
+    server {
+      listen 8080;
+
+      location = /auth {
+        proxy_pass http://oauth2-proxy.kubernetes-dashboard.svc.cluster.local:4180/oauth2/auth;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header X-Original-URI $request_uri;
+        # add_header only decorates 2xx/3xx responses by default, matching
+        # exactly the case where oauth2-proxy said this session is allowed.
+        add_header Authorization "Bearer ${STATIC_TOKEN}";
+      }
+    }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard-auth-injector
+  namespace: kubernetes-dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dashboard-auth-injector
+  template:
+    metadata:
+      labels:
+        app: dashboard-auth-injector
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.27-alpine
+        # The official nginx image auto-renders *.template files in this dir
+        # with envsubst, substituting only variables that exist in the
+        # container's own environment (i.e. just ${STATIC_TOKEN} below) —
+        # nginx's own runtime $variables (like $request_uri) are untouched
+        # since they aren't real env vars at container-start time.
+        env:
+        - name: STATIC_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: dashboard-static-admin-token
+              key: token
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: conf-template
+          mountPath: /etc/nginx/templates
+      volumes:
+      - name: conf-template
+        configMap:
+          name: dashboard-auth-injector-conf
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard-auth-injector
+  namespace: kubernetes-dashboard
+spec:
+  ports:
+  - port: 8080
+    targetPort: 8080
+  selector:
+    app: dashboard-auth-injector

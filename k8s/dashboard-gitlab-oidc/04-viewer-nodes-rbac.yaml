@@ -1,0 +1,33 @@
+---
+# The built-in "view" ClusterRole (bound to viewers in 03-rbac.yaml via
+# dashboard-viewer-binding) only covers namespaced resources — verified with
+# `kubectl describe clusterrole view`, it has no rule for "nodes" (nor
+# persistentvolumes, storageclasses, etc; those are cluster-scoped and
+# deliberately left out of view/edit/admin upstream). Without this, a viewer
+# sees pods/deployments/etc. fine but the Dashboard's Nodes page comes back
+# empty/forbidden even though they're an authenticated, non-admin user.
+#
+# Kept separate from 03-rbac.yaml so the admin/viewer split there stays
+# untouched — this only adds the missing node read access on top.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dashboard-viewer-nodes
+rules:
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dashboard-viewer-nodes-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: dashboard-viewer-nodes
+subjects:
+- kind: Group
+  name: system:authenticated
+  apiGroup: rbac.authorization.k8s.io

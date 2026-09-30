@@ -20,30 +20,33 @@ spec:
               number: 4180
 
 ---
-# Protected dashboard — nginx checks auth with oauth2-proxy, then copies the
-# user's own ID token (set on the auth response by --set-authorization-header)
-# into the request forwarded to the dashboard via auth-response-headers.
+# Protected dashboard — nginx checks auth via dashboard-auth-injector
+# (05-static-auth-injector.yaml), which internally re-checks with oauth2-proxy
+# (same email-allowlist gate as before) and, on success, stamps a fixed
+# static ServiceAccount token onto the response. auth-response-headers then
+# copies that into the request forwarded to the dashboard.
 #
-# Deliberately NOT injecting a static admin service-account token here (unlike
-# k8s/oidc_k8s/04-ingress.yaml and k8s/oauth2proxy-deployment.yaml) — that
-# approach gives every logged-in user the same identity and makes per-email
-# RBAC impossible. Forwarding each user's own token lets kube-apiserver (via
-# its --oidc-* flags) and RBAC (03-rbac.yaml) decide admin vs. read-only.
+# Previously this pointed straight at oauth2-proxy and forwarded each user's
+# own GitLab ID token (see git history / README) — that kept expiring
+# mid-session and forcing re-logins, so every allowlisted user now shares one
+# static, non-expiring identity instead. This also means the per-email
+# admin/viewer RBAC split (03-rbac.yaml, 04-viewer-nodes-rbac.yaml) no longer
+# applies to anyone going through here — see 05-static-auth-injector.yaml.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: kubernetes-dashboard-ingress
   namespace: kubernetes-dashboard
   annotations:
-    nginx.ingress.kubernetes.io/auth-url: "http://oauth2-proxy.kubernetes-dashboard.svc.cluster.local:4180/oauth2/auth"
+    nginx.ingress.kubernetes.io/auth-url: "http://dashboard-auth-injector.kubernetes-dashboard.svc.cluster.local:8080/auth"
     nginx.ingress.kubernetes.io/auth-signin: "https://kubedashboard.localhost/oauth2/start?rd=$scheme://$host$request_uri$is_args$args"
     nginx.ingress.kubernetes.io/auth-response-headers: "Authorization"
     nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
-    # The GitLab ID token forwarded via auth-response-headers is a full JWT
-    # (often 1-3KB+), bigger than nginx's default proxy_buffer_size (4k/8k).
-    # Without this, nginx logs "upstream sent too big header while reading
-    # response header from upstream ... subrequest: /oauth2/auth" and the
-    # auth check fails. Bump further (e.g. "32k") if the warning persists.
+    # The injected token is a Kubernetes ServiceAccount JWT, which can still
+    # be bigger than nginx's default proxy_buffer_size (4k/8k). Without this,
+    # nginx logs "upstream sent too big header while reading response header
+    # from upstream ... subrequest: /auth" and the auth check fails. Bump
+    # further (e.g. "32k") if the warning persists.
     nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
 spec:
   ingressClassName: nginx
