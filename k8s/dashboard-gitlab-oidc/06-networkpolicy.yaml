@@ -1,0 +1,64 @@
+---
+# Needed on clusters that enforce NetworkPolicy (e.g. Calico/Cilium on a
+# kubeadm cluster with a default-deny baseline) — unlike kind, which doesn't
+# run a NetworkPolicy controller at all, so this gap never showed up in local
+# testing. Once a pod is selected by ANY NetworkPolicy, only explicitly
+# allowed traffic reaches it; everything else in this namespace was presumably
+# covered already (e.g. the Dashboard Helm chart's own policy), but
+# oauth2-proxy and dashboard-auth-injector were hand-written and had none.
+#
+# "ingress-nginx" is matched via the built-in, automatically-set
+# kubernetes.io/metadata.name=<namespace> label (present on every namespace
+# since Kubernetes 1.21) — works without having to label that namespace
+# yourself. Adjust it if your ingress controller lives under a different
+# namespace name.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-oauth2-proxy
+  namespace: kubernetes-dashboard
+spec:
+  podSelector:
+    matchLabels:
+      app: oauth2-proxy
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    # nginx ingress -> oauth2-proxy (the public /oauth2 path, and the
+    # redirect/callback flow during actual login)
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+    # dashboard-auth-injector -> oauth2-proxy (same namespace: its /auth
+    # endpoint re-checks the session against oauth2-proxy's /oauth2/auth
+    # internally, see 05-static-auth-injector.yaml)
+    - podSelector:
+        matchLabels:
+          app: dashboard-auth-injector
+    ports:
+    - protocol: TCP
+      port: 4180
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-dashboard-auth-injector
+  namespace: kubernetes-dashboard
+spec:
+  podSelector:
+    matchLabels:
+      app: dashboard-auth-injector
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    # nginx ingress -> dashboard-auth-injector, via kubernetes-dashboard-ingress's
+    # auth-url annotation (02-ingress.yaml)
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 8080

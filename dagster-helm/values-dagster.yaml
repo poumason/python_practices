@@ -1,0 +1,159 @@
+# =============================================================================
+# Dagster 主 chart（dagster/dagster）values
+# 部署：webserver + daemon + instance 設定
+#
+#   helm upgrade --install dagster dagster/dagster \
+#     -n dagster --version <CHART_VERSION> -f values-dagster.yaml
+#
+# 設計前提：
+#   - 不使用 K8sRunLauncher（不動態建立 Job / Pod，也不使用 CronJob）
+#   - run 在各 code location Pod 內以 subprocess 執行（DefaultRunLauncher）
+#   - 排程由 dagster-daemon 負責
+#   - code location 由開發者用 dagster/dagster-user-deployments 各自部署
+#   - workspace 清單用外部 ConfigMap（workspace-configmap.yaml）管理
+#
+# 注意：鍵名會隨 chart 版本變動，打包前請用
+#   helm show values dagster/dagster --version <CHART_VERSION>
+# 對照確認。
+# =============================================================================
+
+global:
+  # PostgreSQL 密碼的 Secret 名稱，Secret 內的 key 為 postgresql-password
+  # 主 chart 與所有 user-deployments release 都必須使用同一個名稱
+  postgresqlSecretName: "dagster-postgresql-secret"
+
+# 由外部自行建立 Secret（見 secrets.example.yaml），不讓 chart 產生
+generatePostgresqlPasswordSecret: false
+
+# -----------------------------------------------------------------------------
+# 內網環境關閉 telemetry
+# -----------------------------------------------------------------------------
+telemetry:
+  enabled: false
+
+# -----------------------------------------------------------------------------
+# Webserver（UI / GraphQL API）
+# -----------------------------------------------------------------------------
+dagsterWebserver:
+  replicaCount: 1
+  # 若公司 k8s 無法直接拉 Docker Hub，改成內部 registry 的 mirror
+  # image:
+  #   repository: "registry.internal/mirror/dagster/dagster-celery-k8s"
+  #   tag: "<DAGSTER_VERSION>"
+  #   pullPolicy: IfNotPresent
+
+  # 使用外部 workspace ConfigMap：新增 code location 時只要更新 ConfigMap，
+  # 不需要升級主 chart
+  workspace:
+    enabled: true
+    servers: []
+    externalConfigmap: "dagster-workspace"
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+  # 若啟用 S3ComputeLogManager，webserver 需要讀取 log 的金鑰
+  # envSecrets:
+  #   - name: dagster-s3-credentials
+
+# -----------------------------------------------------------------------------
+# Code location 改由獨立 release 部署
+# 注意：enabled 必須保持 true，只關閉 enableSubchart。
+#       若 enabled 設成 false，workspace 設定不會產生，webserver/daemon 會啟動失敗。
+# -----------------------------------------------------------------------------
+dagster-user-deployments:
+  enabled: true
+  enableSubchart: false
+
+# -----------------------------------------------------------------------------
+# Run Launcher：DefaultRunLauncher
+# run 在 job 所屬的 code location Pod 中以 subprocess 執行，不建立 k8s Job
+# -----------------------------------------------------------------------------
+runLauncher:
+  type: CustomRunLauncher
+  config:
+    customRunLauncher:
+      module: dagster
+      class: DefaultRunLauncher
+      config: {}
+
+# -----------------------------------------------------------------------------
+# Daemon（schedule / sensor / run queue）
+# -----------------------------------------------------------------------------
+dagsterDaemon:
+  enabled: true
+  # image:
+  #   repository: "registry.internal/mirror/dagster/dagster-celery-k8s"
+  #   tag: "<DAGSTER_VERSION>"
+  #   pullPolicy: IfNotPresent
+
+  # 限制同時執行的 run 數量，避免把 code location Pod 的資源吃滿
+  runCoordinator:
+    enabled: true
+    type: QueuedRunCoordinator
+    config:
+      queuedRunCoordinator:
+        maxConcurrentRuns: 3
+        tagConcurrencyLimits:
+          # backfill 一次只跑一個
+          - key: "dagster/backfill"
+            value: "true"
+            limit: 1
+
+  # code location 重新部署或 Pod 重啟導致 run 中斷時，自動重試
+  runRetries:
+    enabled: true
+    maxRetries: 1
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 250m
+      memory: 512Mi
+
+# -----------------------------------------------------------------------------
+# PostgreSQL：改接公司既有的 DB，不使用 chart 內建的 PostgreSQL
+# 帳號需要建立 table 的權限（Dagster 啟動時會自動 migrate）
+# -----------------------------------------------------------------------------
+postgresql:
+  enabled: false
+  postgresqlHost: "pg.internal.example.com"   # TODO: 替換
+  postgresqlUsername: "dagster"               # TODO: 替換
+  postgresqlDatabase: "dagster"               # TODO: 替換
+  service:
+    port: 5432
+
+# -----------------------------------------------------------------------------
+# Compute log（stdout / stderr）
+#
+# 使用 DefaultRunLauncher 時，run 在 code location Pod 執行，stdout/stderr
+# 預設寫在該 Pod 的本機磁碟，webserver 讀不到，Pod 重啟後也會遺失。
+#
+# 若公司有 S3 相容儲存（MinIO 等），建議啟用以下設定，
+# 並在 webserver 與每個 code location 注入存取金鑰（envSecrets）。
+# 若沒有物件儲存，請要求開發者使用 context.log（存在 PostgreSQL，UI 看得到）。
+# -----------------------------------------------------------------------------
+# computeLogManager:
+#   type: S3ComputeLogManager
+#   config:
+#     s3ComputeLogManager:
+#       bucket: "dagster-logs"
+#       prefix: "compute-logs"
+#       endpointUrl: "http://minio.internal:9000"
+
+# -----------------------------------------------------------------------------
+# 用不到的元件全部關閉（Celery 相關）
+# -----------------------------------------------------------------------------
+rabbitmq:
+  enabled: false
+redis:
+  enabled: false
+flower:
+  enabled: false

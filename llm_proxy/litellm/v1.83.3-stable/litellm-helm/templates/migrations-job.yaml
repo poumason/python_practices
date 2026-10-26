@@ -1,0 +1,46 @@
+---
+# Source: litellm-helm/templates/migrations-job.yaml
+# This job runs the Prisma migrations for the LiteLLM DB.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: release-name-litellm-migrations
+  labels:
+    helm.sh/chart: litellm-helm-1.1.0
+    app.kubernetes.io/name: litellm
+    app.kubernetes.io/instance: release-name
+    app.kubernetes.io/version: "v1.80.12"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    checksum/config: c3fa17dbaebba40c0a752a4a051d0f0520f07b205ee2c0943a2cf1742555bef9
+spec:
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: litellm-helm-1.1.0
+        app.kubernetes.io/name: litellm
+        app.kubernetes.io/instance: release-name
+        app.kubernetes.io/version: "v1.80.12"
+        app.kubernetes.io/managed-by: Helm
+      annotations:
+    spec:
+      serviceAccountName: default 
+      containers:
+        - name: prisma-migrations
+          image: "ghcr.io/berriai/litellm-database:main-v1.80.12"
+          imagePullPolicy: Always
+          securityContext:
+            {}
+          command: ["python", "litellm/proxy/prisma_migration.py"]
+          workingDir: "/app"
+          env:
+            - name: DATABASE_URL
+              value: postgresql://litellm:NoTaGrEaTpAsSwOrD@release-name-postgresql/litellm
+            - name: DISABLE_SCHEMA_UPDATE
+              value: "false" # always run the migration from the Helm PreSync hook, override the value set
+      restartPolicy: OnFailure
+  ttlSecondsAfterFinished: 120
+  backoffLimit: 4
+

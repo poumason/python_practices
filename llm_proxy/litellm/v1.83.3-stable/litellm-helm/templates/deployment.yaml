@@ -1,0 +1,117 @@
+---
+# Source: litellm-helm/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    {}
+  name: release-name-litellm
+  labels:
+    helm.sh/chart: litellm-helm-1.1.0
+    app.kubernetes.io/name: litellm
+    app.kubernetes.io/instance: release-name
+    app.kubernetes.io/version: "v1.80.12"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: litellm
+      app.kubernetes.io/instance: release-name
+  template:
+    metadata:
+      annotations:
+        checksum/config: 539b826c05fe5e4f59a28ad6460dfc66de428ab59f67da9ab3b2c2c0b573b9cd
+      labels:
+        helm.sh/chart: litellm-helm-1.1.0
+        app.kubernetes.io/name: litellm
+        app.kubernetes.io/instance: release-name
+        app.kubernetes.io/version: "v1.80.12"
+        app.kubernetes.io/managed-by: Helm
+    spec:
+      serviceAccountName: default
+      securityContext:
+        {}
+      containers:
+        - name: litellm
+          securityContext:
+            {}
+          image: "ghcr.io/berriai/litellm-database:main-v1.80.12"
+          imagePullPolicy: Always
+          env:
+            - name: HOST
+              value: "0.0.0.0"
+            - name: PORT
+              value: "4000"
+            - name: DATABASE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: release-name-litellm-dbcredentials
+                  key: username
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: release-name-litellm-dbcredentials
+                  key: password
+            - name: DATABASE_HOST
+              value: release-name-postgresql
+            - name: DATABASE_NAME
+              value: litellm
+            - name: PROXY_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: release-name-litellm-masterkey
+                  key: masterkey
+          envFrom:
+          args:
+            - --config
+            - /etc/litellm/config.yaml
+            
+          ports:
+            - name: http
+              containerPort: 4000
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: "/health/liveliness"
+              port: "http"
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: "/health/readiness"
+              port: "http"
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: "/health/readiness"
+              port: "http"
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 30
+          resources:
+            {}
+          volumeMounts:
+            - name: litellm-config
+              mountPath: /etc/litellm/config.yaml
+              subPath: config.yaml
+          
+      volumes:
+        
+        - name: litellm-config
+          configMap:
+            name: release-name-litellm-config
+            items:
+              - key: config.yaml
+                path: "config.yaml"
+      terminationGracePeriodSeconds: 90
+

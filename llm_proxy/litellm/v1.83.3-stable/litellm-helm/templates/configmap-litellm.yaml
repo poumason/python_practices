@@ -1,0 +1,21 @@
+---
+# Source: litellm-helm/templates/configmap-litellm.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: release-name-litellm-config
+data:
+  config.yaml: |
+      general_settings:
+        master_key: os.environ/PROXY_MASTER_KEY
+      model_list:
+      - litellm_params:
+          api_key: eXaMpLeOnLy
+          model: gpt-3.5-turbo
+        model_name: gpt-3.5-turbo
+      - litellm_params:
+          api_base: https://exampleopenaiendpoint-production.up.railway.app/
+          api_key: fake-key
+          model: openai/fake
+        model_name: fake-openai-endpoint
+

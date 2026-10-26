@@ -1,0 +1,49 @@
+---
+# Source: litellm-helm/templates/tests/test-env-vars.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "release-name-litellm-env-test"
+  labels:
+    helm.sh/chart: litellm-helm-1.1.0
+    app.kubernetes.io/name: litellm
+    app.kubernetes.io/instance: release-name
+    app.kubernetes.io/version: "v1.80.12"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    "helm.sh/hook": test
+spec:
+  containers:
+    - name: test
+      image: busybox
+      command: ['sh', '-c']
+      args:
+        - |
+          # Test DD_ENV
+          if [ "$DD_ENV" != "dev_helm" ]; then
+            echo "❌ Environment variable DD_ENV mismatch. Expected: dev_helm, Got: $DD_ENV"
+            exit 1
+          fi
+          echo "✅ Environment variable DD_ENV matches expected value: $DD_ENV"
+          
+          # Test DD_SERVICE
+          if [ "$DD_SERVICE" != "litellm" ]; then
+            echo "❌ Environment variable DD_SERVICE mismatch. Expected: litellm, Got: $DD_SERVICE"
+            exit 1
+          fi
+          echo "✅ Environment variable DD_SERVICE matches expected value: $DD_SERVICE"
+          
+          # Test USE_DDTRACE
+          if [ "$USE_DDTRACE" != "true" ]; then
+            echo "❌ Environment variable USE_DDTRACE mismatch. Expected: true, Got: $USE_DDTRACE"
+            exit 1
+          fi
+          echo "✅ Environment variable USE_DDTRACE matches expected value: $USE_DDTRACE"
+      env:
+        - name: DD_ENV
+          value: 
+        - name: DD_SERVICE
+          value: 
+        - name: USE_DDTRACE
+          value: 
+  restartPolicy: Never

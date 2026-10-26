@@ -1,77 +1,113 @@
 version: '3.8'
+
+networks:
+  redis-net:
+    driver: bridge
+
+volumes:
+  redis_master_data:
+  redis_replica_data:
+
 services:
   redis-master:
+    image: bitnami/redis:latest
     container_name: redis-master
-    image: 'bitnami/redis:latest'
     environment:
       - REDIS_REPLICATION_MODE=master
-      - REDIS_PASSWORD=redispassword
+      - REDIS_PASSWORD=redis1234
+      - REDIS_ANNOUNCE_IP=127.0.0.1
+      - REDIS_ANNOUNCE_PORT=6379
+    volumes:
+      - redis_master_data:/bitnami/redis/data
     ports:
       - "6379:6379"
     networks:
-      - ai_default
+      - redis-net
 
-  redis-slave:
-    container_name: slave-redis
-    image: 'bitnami/redis:latest'
+  redis-replica:
+    image: bitnami/redis:latest
+    container_name: redis-replica
+    depends_on:
+      - redis-master
     environment:
       - REDIS_REPLICATION_MODE=slave
       - REDIS_MASTER_HOST=redis-master
-      - REDIS_MASTER_PASSWORD=redispassword
-      - REDIS_PASSWORD=redispassword
+      - REDIS_MASTER_PORT_NUMBER=6379
+      - REDIS_MASTER_PASSWORD=redis1234
+      - REDIS_PASSWORD=redis1234
+      - REDIS_ANNOUNCE_IP=127.0.0.1
+      - REDIS_ANNOUNCE_PORT=6380
+    volumes:
+      - redis_replica_data:/bitnami/redis/data
     ports:
-      - "7000:6379"
-    depends_on:
-      - redis-master
+      - "6380:6379"
     networks:
-      - ai_default
+      - redis-net
 
-  redis-sentinel-1:
-    image: 'bitnami/redis-sentinel:latest'
+  sentinel-1:
+    image: bitnami/redis-sentinel:latest
     container_name: sentinel-1
-    environment:
-      - REDIS_MASTER_SET=mymaster
-      - REDIS_MASTER_HOST=redis-master
-      - REDIS_MASTER_PASSWORD=redispassword
-      - REDIS_SENTINEL_DOWN_AFTER_MILLISECONDS=10000
     depends_on:
       - redis-master
-      - redis-slave
+      - redis-replica
+    environment:
+      - REDIS_MASTER_HOST=redis-master
+      - REDIS_MASTER_PORT_NUMBER=6379
+      - REDIS_MASTER_SET=mymaster
+      - REDIS_MASTER_PASSWORD=redis1234
+      - REDIS_SENTINEL_PASSWORD=redis1234
+      - REDIS_SENTINEL_QUORUM=2
+      - REDIS_SENTINEL_DOWN_AFTER_MILLISECONDS=5000
+      - REDIS_SENTINEL_FAILOVER_TIMEOUT=60000
     ports:
-       - "26379:26379"
+      - "26379:26379"
     networks:
-      - ai_default
+      - redis-net
 
-  redis-sentinel-2:
-    image: 'bitnami/redis-sentinel:latest'
+  sentinel-2:
+    image: bitnami/redis-sentinel:latest
     container_name: sentinel-2
-    environment:
-      - REDIS_MASTER_SET=mymaster
-      - REDIS_MASTER_HOST=redis-master
-      - REDIS_MASTER_PASSWORD=redispassword
-      - REDIS_SENTINEL_DOWN_AFTER_MILLISECONDS=10000
     depends_on:
       - redis-master
-      - redis-slave
+      - redis-replica
+    environment:
+      - REDIS_MASTER_HOST=redis-master
+      - REDIS_MASTER_PORT_NUMBER=6379
+      - REDIS_MASTER_SET=mymaster
+      - REDIS_MASTER_PASSWORD=redis1234
+      - REDIS_SENTINEL_PASSWORD=redis1234
+      - REDIS_SENTINEL_QUORUM=2
+      - REDIS_SENTINEL_DOWN_AFTER_MILLISECONDS=5000
+      - REDIS_SENTINEL_FAILOVER_TIMEOUT=60000
     ports:
       - "26380:26379"
-  redis-sentinel-3:
-    image: 'bitnami/redis-sentinel:latest'
+    networks:
+      - redis-net
+
+  sentinel-3:
+    image: bitnami/redis-sentinel:latest
     container_name: sentinel-3
-    environment:
-      - REDIS_MASTER_SET=mymaster
-      - REDIS_MASTER_HOST=redis-master
-      - REDIS_MASTER_PASSWORD=redispassword
-      - REDIS_SENTINEL_DOWN_AFTER_MILLISECONDS=10000
     depends_on:
       - redis-master
-      - redis-slave
+      - redis-replica
+    environment:
+      - REDIS_MASTER_HOST=redis-master
+      - REDIS_MASTER_PORT_NUMBER=6379
+      - REDIS_MASTER_SET=mymaster
+      - REDIS_MASTER_PASSWORD=redis1234
+      - REDIS_SENTINEL_PASSWORD=redis1234
+      - REDIS_SENTINEL_QUORUM=2
+      - REDIS_SENTINEL_DOWN_AFTER_MILLISECONDS=5000
+      - REDIS_SENTINEL_FAILOVER_TIMEOUT=60000
     ports:
       - "26381:26379"
     networks:
-      - ai_default
+      - redis-net
 
-networks:
-  ai_default:
-    external:
-      name: ai_default
+  redis-insight:
+    image: redis/redisinsight:latest
+    container_name: redis-insight
+    ports:
+      - "5540:5540"
+    networks:
+      - redis-net

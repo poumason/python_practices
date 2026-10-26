@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    k8s-app: oauth2-proxy
+  name: oauth2-proxy
+  namespace: kubernetes-dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: oauth2-proxy
+  template:
+    metadata:
+      labels:
+        k8s-app: oauth2-proxy
+    spec:
+      containers:
+      - args:
+        - --provider=github
+        - --email-domain=*
+        - --upstream=file:///dev/null
+        - --upstream=https://kubernetes-dashboard-kong-proxy
+        - --http-address=0.0.0.0:4180
+        - --redirect-url=https://dashboard.local/oauth2/callback
+        # Register a new application
+        # https://github.com/settings/applications/new
+        env:
+        - name: OAUTH2_PROXY_CLIENT_ID
+          value: "Ov23li1FNyXG1jEiGm6g"
+        - name: OAUTH2_PROXY_CLIENT_SECRET
+          value: "34de5c9b7401ddfbced962360752e3298303b8b3"
+        # docker run -ti --rm python:3-alpine python -c 'import secrets,base64; print(base64.b64encode(base64.b64encode(secrets.token_bytes(16))));'
+        - name: OAUTH2_PROXY_COOKIE_SECRET
+          value: "ApLd9UBOd8YwaJcXqn/DJA=="
+        - name: OAUTH2_PROXY_COOKIE_SECURE
+          value: "false"
+        # Recommended: remove email-domain=* in args and set an allowlist
+        # - name: OAUTH2_PROXY_GITHUB_USERS
+        #   value: alice,bob
+        image: quay.io/oauth2-proxy/oauth2-proxy:latest
+        imagePullPolicy: Always
+        name: oauth2-proxy
+        ports:
+        - containerPort: 4180
+          protocol: TCP
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    k8s-app: oauth2-proxy
+  name: oauth2-proxy
+  namespace: kubernetes-dashboard
+spec:
+  ports:
+  - name: http
+    port: 4180
+    protocol: TCP
+    targetPort: 4180
+  selector:
+    k8s-app: oauth2-proxy
+
+---
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: oauth2-proxy
+  namespace: kubernetes-dashboard
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: dashboard.local
+    http:
+      paths:
+      - path: /oauth2
+        pathType: Prefix
+        backend:
+          service:
+            name: oauth2-proxy
+            port:
+              number: 4180
+  # tls:
+  # - hosts:
+  #   - dashboard.local
+  #   secretName: __INGRESS_SECRET__
+
+---
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: HTTPS
+    nginx.ingress.kubernetes.io/auth-url: "https://oauth2-proxy.kubernetes-dashboard.svc.cluster.local:4180/oauth2/auth"
+    nginx.ingress.kubernetes.io/auth-signin: "https://oauth2-proxy.kubernetes-dashboard.svc.cluster.local:4180/oauth2/start?rd=$escaped_request_uri"
+  name: external-auth-oauth2
+  namespace: kubernetes-dashboard
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: dashboard.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: kubernetes-dashboard-kong-proxy
+            port:
+              number: 443

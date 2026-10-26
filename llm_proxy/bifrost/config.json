@@ -1,0 +1,27 @@
+{
+  "$schema": "https://www.getbifrost.ai/schema",
+  "config_store": {
+    "enabled": true,
+    "type": "postgres",
+    "config": {
+      "host": "postgres_db",
+      "port": "5432",
+      "user": "admin",
+      "password": "admin",
+      "db_name": "bifrost",
+      "ssl_mode": "disable"
+    }
+  },
+  "logs_store": {
+    "enabled": true,
+    "type": "postgres",
+    "config": {
+      "host": "postgres_db",
+      "port": "5432",
+      "user": "admin",
+      "password": "admin",
+      "db_name": "bifrost",
+      "ssl_mode": "disable"
+    }
+  }
+}

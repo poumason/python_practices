@@ -1,0 +1,1 @@
+helm install my-postgresql-ha bitnami/postgresql-ha --version 16.2.2 --set postgresql.password=postgres --set postgresql.username=postgres

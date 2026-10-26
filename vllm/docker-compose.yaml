@@ -1,0 +1,18 @@
+version: "3.9"
+services:
+  vllm:
+    image: vllm/vllm-openai:v0.11.0
+    platform: linux/amd64  # Force x86_64 image on M2
+    ports:
+      - "8000:8000"
+    volumes:
+       - /Users/poulin/.cache/huggingface/hub/models--BAAI--bge-reranker-v2-m3/snapshots/953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e:/model
+    environment:
+      - VLLM_USE_CPU=1
+      - HF_HOME=/model
+      - VLLM_LOGGING_LEVEL=DEBUG
+    command: >
+      --model /model
+      --host 0.0.0.0
+      --port 8000
+      --dtype float32

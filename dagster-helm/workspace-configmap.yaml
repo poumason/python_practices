@@ -1,0 +1,31 @@
+# =============================================================================
+# Workspace 清單：告訴 webserver / daemon 要連哪些 code location
+#
+# 由平台維護者管理。新增或移除 code location 的流程：
+#   1. 開發者發 MR 修改此檔
+#   2. 審核通過後：kubectl apply -f workspace-configmap.yaml
+#   3. 到 Dagster UI 的 Deployment 頁面按 Reload
+#
+# 規則：
+#   - host 必須等於該 code location 在 user-deployments values 裡的 deployments[].name
+#     （chart 會用這個名稱建立 k8s Service）
+#   - 若 code location 在其他 namespace，host 改用完整 DNS：
+#       <name>.<namespace>.svc.cluster.local
+#   - location_name 不可重複，建議「團隊或開發者-用途」
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dagster-workspace
+  namespace: dagster
+data:
+  workspace.yaml: |
+    load_from:
+      - grpc_server:
+          location_name: "example-etl"
+          host: "example-etl"
+          port: 3030
+      # - grpc_server:
+      #     location_name: "alice-etl"
+      #     host: "alice-etl"
+      #     port: 3030

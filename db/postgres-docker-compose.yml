@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  postgres_db:
+    image: postgres:16 # Use a specific version for stability
+    container_name: postgres_db
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: mydatabase
+      PGDATA: /var/lib/postgresql/data/pgdata # Optional: specify data directory
+    volumes:
+      - postgres_data:/var/lib/postgresql/data # Data persistence
+    ports:
+      - "5432:5432"
+    restart: always
+    networks:
+      - ai_default
+
+  pgadmin:
+    image: dpage/pgadmin4:9.10
+    container_name: pgadmin_container
+    environment:
+      PGADMIN_DEFAULT_EMAIL: pou@localhost.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False' # Optional: for a simpler desktop-like experience
+    ports:
+      - "8080:80" # Map host port 8080 to container port 80
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin # Configuration persistence
+    restart: always
+    depends_on:
+      - postgres_db # Ensures PostgreSQL starts first
+    networks:
+      - ai_default
+
+volumes:
+  postgres_data:
+  pgadmin_data:
+
+
+networks:
+  ai_default:
+    external: true # Mark it as an existing, external network

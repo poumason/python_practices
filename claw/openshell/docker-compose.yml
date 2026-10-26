@@ -1,0 +1,11 @@
+services:
+  openshell-cluster:
+    container_name: cluster
+    image: ghcr.io/nvidia/openshell/cluster:0.0.16
+    privileged: true
+    # network_mode: host
+    ports:
+      - "8080:30051"
+    volumes:
+      - ./k3s/registries.yaml:/etc/rancher/k3s/registries.yaml
+    command: server
