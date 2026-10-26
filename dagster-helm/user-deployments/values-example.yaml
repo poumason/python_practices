@@ -1,0 +1,45 @@
+# =============================================================================
+# 開發者用的 code location 範本（dagster/dagster-user-deployments）
+#
+# 複製此檔為 values-<name>.yaml，修改後部署：
+#
+#   helm upgrade --install <name> dagster/dagster-user-deployments \
+#     -n dagster --version <CHART_VERSION> -f values-<name>.yaml
+#
+# 更新程式碼：改 image tag 後重新執行上面的指令，再到 UI 按 Reload。
+# 第一次新增 code location：還需要請平台維護者更新 workspace-configmap.yaml。
+#
+# 注意：
+#   - 因為使用 DefaultRunLauncher，run 會在這個 Pod 裡執行。
+#     resources 要以「maxConcurrentRuns 個 run 同時在此 Pod 執行」來估算。
+#   - 必須和主 chart 部署在同一個 namespace，才能讀到 instance 設定與 DB Secret。
+# =============================================================================
+
+global:
+  # 必須和主 chart 相同
+  postgresqlSecretName: "dagster-postgresql-secret"
+
+deployments:
+  - name: "example-etl"     # 必須和 workspace 的 host / location_name 一致
+    image:
+      repository: "registry.internal/team/example-etl"   # TODO: 替換
+      tag: "v1.0.0"
+      pullPolicy: IfNotPresent
+
+    # 載入哪個模組的 Definitions
+    dagsterApiGrpcArgs:
+      - "-m"
+      - "example_etl.definitions"
+    port: 3030
+
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+
+    # 若主 chart 啟用 S3ComputeLogManager，需要注入金鑰
+    # envSecrets:
+    #   - name: dagster-s3-credentials

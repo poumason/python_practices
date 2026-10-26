@@ -1,0 +1,27 @@
+# =============================================================================
+# Code location 共用 base image
+#
+# 開發者的 image 從這裡繼承，確保 dagster 版本與主 chart 一致。
+#
+#   docker build -f Dockerfile.base \
+#     --build-arg DAGSTER_VERSION=<與 chart 相同的版本> \
+#     -t registry.internal/dagster/code-base:<DAGSTER_VERSION> .
+#
+# 開發者的 Dockerfile 範例：
+#   FROM registry.internal/dagster/code-base:<DAGSTER_VERSION>
+#   COPY requirements.txt .
+#   RUN pip install --no-cache-dir -r requirements.txt
+#   COPY example_etl/ ./example_etl/
+# =============================================================================
+FROM python:3.12-slim
+
+ARG DAGSTER_VERSION
+
+# dagster-postgres：run 在 code location Pod 內執行，需要寫入 DB
+# dagster-aws：若 compute log 使用 S3 / MinIO
+RUN pip install --no-cache-dir \
+      "dagster==${DAGSTER_VERSION}" \
+      "dagster-postgres" \
+      "dagster-aws"
+
+WORKDIR /opt/dagster/app
