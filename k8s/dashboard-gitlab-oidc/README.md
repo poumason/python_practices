@@ -3,24 +3,41 @@
 ## Architecture
 
 ```
-Browser → nginx ingress (auth-url/auth-signin) → oauth2-proxy ──OIDC──► GitLab.com
-              │ auth-response-headers: Authorization
-              │ (carries the logged-in user's own ID token)
-              ▼
-     kubernetes-dashboard ──Bearer <user ID token>──► kube-apiserver
-                                                         (validates via --oidc-* flags,
-                                                          maps `email` claim → RBAC User)
+Browser → nginx ingress (auth-url) → dashboard-auth-injector ──OIDC check──► oauth2-proxy ──► GitLab.com
+                                           │ add_header Authorization:
+                                           │ Bearer <static token> (always, on any status)
+                                           ▼
+                             nginx auth-response-headers copies it through
+                                           ▼
+                             kubernetes-dashboard ──Bearer <static token>──► kube-apiserver
 ```
 
-This is a **no-Dex** variant of `../oidc_k8s/`: GitLab.com is trusted directly as
-the OIDC issuer by both `oauth2-proxy` and `kube-apiserver`, so there's no broker
-pod and no self-signed TLS cert to manage.
+**Current design (as of 2026-09-30): a shared static token, not per-user RBAC.**
+This started as a **no-Dex** variant of `../oidc_k8s/` that forwarded each
+user's *own* GitLab ID token to kube-apiserver, so RBAC could tell
+`poumason@live.com` apart from everyone else (see git history / the
+`03-rbac.yaml` and `04-viewer-nodes-rbac.yaml` comments for that design). That
+kept breaking because GitLab's ID token expires every ~10-12 minutes and the
+forced re-login mid-session was disruptive enough that, after internal
+discussion, we gave up per-user differentiation:
 
-Unlike `../oidc_k8s/04-ingress.yaml` and `../oauth2proxy-deployment.yaml`, this
-setup does **not** inject one shared admin service-account token for every
-user. Instead nginx forwards each user's *own* ID token to the dashboard,
-which forwards it to kube-apiserver — so RBAC (`03-rbac.yaml`) can tell
-`poumason@live.com` apart from everyone else and give them different access.
+- `oauth2-proxy` is now purely a **login gate** — anyone on its email
+  allowlist (`01-oauth2proxy.yaml`) can get in, nothing more.
+- `dashboard-auth-injector` (`05-static-auth-injector.yaml`) sits between
+  nginx and oauth2-proxy, re-checks the session against oauth2-proxy
+  internally, and on success stamps a **fixed, non-expiring Kubernetes
+  ServiceAccount token** onto the response instead of the user's own token.
+  nginx's `auth-response-headers` (a plain annotation, not a snippet) copies
+  that into the request forwarded to the Dashboard.
+- Every allowed email now shares the exact same identity/permissions (bound
+  to `cluster-admin` by default) — `03-rbac.yaml` / `04-viewer-nodes-rbac.yaml`
+  are left in place but unused by this path.
+
+This exists specifically because the company's ingress-nginx has
+`configuration-snippet` disabled by policy, which is the usual way people do
+this kind of static-token injection — `dashboard-auth-injector` is a plain
+Deployment/ConfigMap/Service, not an Ingress annotation, so it isn't subject
+to that admission-webhook restriction at all.
 
 ---
 
@@ -112,15 +129,29 @@ helm upgrade --install kubernetes-dashboard kubernetes-dashboard/kubernetes-dash
   --create-namespace --namespace kubernetes-dashboard
 ```
 
-### 5. Apply Redis, oauth2-proxy, ingress, and RBAC
+### 5. Apply Redis, oauth2-proxy, the static-token injector, NetworkPolicy, ingress, and RBAC
 
 ```bash
 kubectl apply -f k8s/dashboard-gitlab-oidc/01-redis.yaml
 kubectl apply -f k8s/dashboard-gitlab-oidc/01-oauth2proxy.yaml
+kubectl apply -f k8s/dashboard-gitlab-oidc/05-static-auth-injector.yaml
+kubectl apply -f k8s/dashboard-gitlab-oidc/06-networkpolicy.yaml
 kubectl apply -f k8s/dashboard-gitlab-oidc/02-ingress.yaml
 kubectl apply -f k8s/dashboard-gitlab-oidc/03-rbac.yaml
 kubectl apply -f k8s/dashboard-gitlab-oidc/04-viewer-nodes-rbac.yaml
 ```
+
+`03-rbac.yaml` and `04-viewer-nodes-rbac.yaml` are no longer load-bearing
+under the current static-token design (see Architecture above) — applying
+them is harmless (nothing routes through per-user tokens to use them) and
+keeps things ready in case this gets reverted later.
+
+If your cluster enforces NetworkPolicy (common on a hardened kubeadm/Calico
+or Cilium setup, unlike `kind` which doesn't run a NetworkPolicy controller
+at all — this is why the gap wasn't caught in local testing), apply
+`06-networkpolicy.yaml` too, or `oauth2-proxy` and `dashboard-auth-injector`
+will be unreachable from the ingress controller with no obvious error beyond
+a connection failure in nginx's logs.
 
 ### 6. Open the dashboard
 
@@ -185,3 +216,5 @@ cost of a pod-level HTML patch.
 | oauth2-proxy: `dial tcp: lookup redis ... no such host` or `NOAUTH Authentication required` | `01-redis.yaml` wasn't applied yet, or `redis-secret`'s password wasn't filled in / doesn't match what oauth2-proxy is using — confirm `redis` pod is `Running` in `kubernetes-dashboard` namespace and `OAUTH2_PROXY_REDIS_PASSWORD` matches `redis-secret` |
 | Logged-in session randomly 401s after ~10 min, page doesn't auto-redirect to login | `kubectl -n kube-system logs <kube-apiserver pod>` shows `oidc: token is expired`. GitLab's ID token only lives ~10-12m; `--cookie-refresh` was too close to that lifetime, leaving a gap where oauth2-proxy still says the session is fine (its own `/oauth2/auth` check keeps returning 202 — so nginx's `auth-signin` never fires, since from its point of view auth succeeded) but the stale token it forwards is already expired by the time it reaches kube-apiserver. Fixed by setting `--cookie-refresh=2m` in `01-oauth2proxy.yaml` so oauth2-proxy refreshes with more margin. This is a structural gap in the front-door-proxy + independent-backend-validation pattern — a tighter refresh interval shrinks the window a lot but can't fully guarantee it never happens; a manual page reload always clears it since that forces a fresh top-level auth check |
 | oauth2-proxy: `Error redeeming code during OAuth2 callback: could not get claim "groups": failed to fetch claims from profile URL: ... unexpected status "401"` — login never completes | GitLab's ID token has no `groups` claim, so oauth2-proxy tries to fetch it from GitLab's profile/userinfo endpoint on every login and that call 401s. We don't use OIDC groups for RBAC anyway (email + built-in `system:authenticated`, see `03-rbac.yaml`), so `01-oauth2proxy.yaml` sets `--skip-claims-from-profile-url=true` to skip that lookup entirely |
+| Logged in successfully but Dashboard shows 401 / no Authorization reaches it, even though `dashboard-auth-injector`'s logs show 202 from oauth2-proxy | nginx's `add_header` directive only decorates a specific status allowlist by default (200/201/204/206/301-304/307) — oauth2-proxy's successful `/oauth2/auth` response is **202**, which isn't on that list, so the header was silently dropped. `05-static-auth-injector.yaml`'s `add_header Authorization ... always;` fixes this — the `always` keyword is required, not optional. After editing the ConfigMap template, you must `kubectl -n kubernetes-dashboard rollout restart deploy/dashboard-auth-injector` — envsubst only renders the template once at container startup, so a running pod won't pick up a ConfigMap change on its own |
+| `dashboard-auth-injector` or `oauth2-proxy` times out / connection refused when nginx tries to reach them, nothing wrong in their own logs | Your cluster enforces NetworkPolicy (common on kubeadm + Calico/Cilium) and once a pod is selected by any NetworkPolicy, only explicitly allowed traffic reaches it. `kind` doesn't run a NetworkPolicy controller at all, so this never surfaced in local testing. Apply `06-networkpolicy.yaml`, which allows the `ingress-nginx` namespace in to both pods (and oauth2-proxy in from `dashboard-auth-injector` too, for its internal re-check) — if your ingress controller runs in a differently-named namespace, update the `namespaceSelector` there accordingly |

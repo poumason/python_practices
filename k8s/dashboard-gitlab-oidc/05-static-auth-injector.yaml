@@ -70,9 +70,16 @@ data:
         proxy_pass_request_body off;
         proxy_set_header Content-Length "";
         proxy_set_header X-Original-URI $request_uri;
-        # add_header only decorates 2xx/3xx responses by default, matching
-        # exactly the case where oauth2-proxy said this session is allowed.
-        add_header Authorization "Bearer ${STATIC_TOKEN}";
+        # oauth2-proxy returns 202 (not 200) on a successful /oauth2/auth
+        # check. nginx's add_header only applies to a specific status
+        # allowlist by default (200/201/204/206/301-304/307) — 202 isn't on
+        # it, so without "always" this header was silently dropped on every
+        # successful check, which is exactly the failure mode we want to
+        # avoid. "always" also adds it on the 401 failure path, but that's
+        # harmless here: auth_request discards this subrequest's body/headers
+        # on failure before anything reaches the actual client, and nginx
+        # never proxies to the real Dashboard backend in that case either.
+        add_header Authorization "Bearer ${STATIC_TOKEN}" always;
       }
     }
 
