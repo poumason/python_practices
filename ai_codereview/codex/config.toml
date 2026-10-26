@@ -1,0 +1,19 @@
+# Codex CLI 設定（json 與 mcp 模式共用的部分）
+# model 與 base_url 會由 CI 以 -c 覆寫，這裡是預設值。
+model = "kimi"                      # LiteLLM 裡的 model alias
+model_provider = "litellm"
+approval_policy = "never"           # CI 沒有人可以按同意
+sandbox_mode = "read-only"
+model_context_window = 128000       # 依 vLLM 的實際上限調整；Codex 不認得自架模型名稱
+
+[model_providers.litellm]
+name = "Internal LiteLLM"
+base_url = "https://litellm.your-company.internal/v1"
+env_key = "LITELLM_API_KEY"         # 從這個環境變數讀 key
+wire_api = "responses"              # LiteLLM 需提供 /v1/responses
+
+[analytics]
+enabled = false
+
+[feedback]
+enabled = false

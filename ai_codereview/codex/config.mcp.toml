@@ -1,0 +1,28 @@
+
+# ---- 只有 mcp 模式會附加這一段 ----
+[mcp_servers.gitlab]
+command = "zereight-mcp-gitlab"
+# 從 job 的環境變數轉入，token 不會寫進檔案
+env_vars = ["GITLAB_API_URL", "GITLAB_PERSONAL_ACCESS_TOKEN"]
+startup_timeout_sec = 30
+tool_timeout_sec = 120
+required = true                     # MCP 起不來就直接失敗，不要讓 agent 空跑
+default_tools_approval_mode = "approve"
+# 白名單：只能讀 MR／issue、留言
+enabled_tools = [
+  "get_merge_request",
+  "list_merge_request_changed_files",
+  "get_merge_request_file_diff",
+  "mr_discussions",
+  "get_merge_request_notes",
+  "get_issue",
+  "create_draft_note",
+  "list_draft_notes",
+  "bulk_publish_draft_notes",
+  "create_note",
+  "update_merge_request_note",
+]
+
+[mcp_servers.gitlab.env]
+GITLAB_PERMISSION_MODE = "modify"   # 拿掉所有刪除類工具
+GITLAB_DISABLE_VERSION_CHECK = "true"

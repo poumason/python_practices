@@ -1,0 +1,123 @@
+# =============================================================================
+# Claude Code AI Review for GitLab MR
+#
+#   模式 A「mcp」 ：Claude Code 透過 GitLab MCP 自己讀 MR、自己留言（agent 全權處理）
+#   模式 B「json」：Claude Code 只讀 repo、輸出 JSON，由 gitlab_review.py 發留言（程式控制）
+#
+# 用 AI_REVIEW_MODE 切換：json（預設）| mcp | both（兩種都跑，用來比較）
+# 可以在 CI/CD variables 設定，或手動跑 pipeline 時覆寫。
+#
+# 需要的 CI/CD variables（Settings → CI/CD → Variables，勾 Masked）：
+#   ANTHROPIC_AUTH_TOKEN  LiteLLM 的 virtual key
+#   GITLAB_REVIEW_TOKEN   bot 帳號的 Project/Group Access Token（scope: api，角色 Reporter 以上）
+# =============================================================================
+
+variables:
+  AI_REVIEW_MODE: "json"
+  AI_REVIEW_HOME: "$CI_PROJECT_DIR/ai_codereview/common"   # 用自建映像時改成 /opt/ai-review
+  AI_REVIEW_IMAGE: "node:24-bookworm-slim"         # 建議改成公司內自建映像（見 Dockerfile）
+  CLAUDE_CODE_VERSION: "2.1.291"                   # 與 Dockerfile 一致
+  GITLAB_MCP_VERSION: "2.1.69"
+  AI_REVIEW_MAX_TURNS: "40"
+  AI_REVIEW_MAX_FINDINGS: "10"
+  AI_REVIEW_MAX_INLINE: "10"
+  AI_REVIEW_MIN_SEVERITY: "medium"                 # 低於此等級只列在總結，不發行內留言
+  AI_REVIEW_FAIL_ON: ""                            # 設成 critical 可在有嚴重問題時讓 job 失敗
+  AI_REVIEW_EXCLUDE: "*.lock,package-lock.json,pnpm-lock.yaml,yarn.lock,go.sum,dist/*,build/*,*/generated/*,*.min.js,*.snap"
+
+# 共用的略過條件：非 MR、標了 ai-review-skip、Draft MR
+.ai_review_skip_rules:
+  rules:
+    - if: $CI_PIPELINE_SOURCE != "merge_request_event"
+      when: never
+    - if: $CI_MERGE_REQUEST_LABELS =~ /(^|,)ai-review-skip(,|$)/
+      when: never
+    - if: $CI_MERGE_REQUEST_TITLE =~ /^(\[?Draft\]?:|\(Draft\)|WIP:)/i && $CI_MERGE_REQUEST_LABELS !~ /(^|,)ai-review(,|$)/
+      when: never
+
+.ai_review_base:
+  stage: review
+  image: $AI_REVIEW_IMAGE
+  interruptible: true                  # 同一 MR 有新 push 時取消舊的 review
+  resource_group: ai-review-$CI_MERGE_REQUEST_IID-$CI_JOB_NAME
+  timeout: 30m
+  allow_failure: true                  # 試行期間不擋合併
+  variables:
+    GIT_DEPTH: "0"                     # 需要完整歷史才能算 diff 基準
+    # ---- Claude Code → 公司 LiteLLM（Anthropic 格式 /v1/messages）----
+    ANTHROPIC_BASE_URL: "https://litellm.your-company.internal"
+    ANTHROPIC_MODEL: "kimi"                        # LiteLLM 裡的 model alias
+    ANTHROPIC_DEFAULT_OPUS_MODEL: "kimi"
+    ANTHROPIC_DEFAULT_SONNET_MODEL: "kimi"
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: "glm-5.3-flash" # 背景小任務用
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"  # 內網：關掉自動更新、遙測等對外連線
+    # NODE_EXTRA_CA_CERTS: /etc/ssl/certs/company-ca.pem   # 內部自簽憑證時打開
+    # SSL_CERT_FILE: /etc/ssl/certs/company-ca.pem
+  before_script:
+    - |
+      if ! command -v claude >/dev/null || ! command -v python3 >/dev/null; then
+        apt-get update -qq && apt-get install -y -qq --no-install-recommends git python3 ca-certificates >/dev/null
+        npm install -g --no-audit --no-fund "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+      fi
+    - claude --version
+    - mkdir -p .ai-review
+  artifacts:
+    when: always
+    expire_in: 14 days
+    paths:
+      - .ai-review/
+
+# -----------------------------------------------------------------------------
+# 模式 B：唯讀 agent → JSON → 程式發留言（建議預設）
+# -----------------------------------------------------------------------------
+ai_review_json:
+  extends: .ai_review_base
+  rules:
+    - !reference [.ai_review_skip_rules, rules]
+    - if: $AI_REVIEW_MODE == "json" || $AI_REVIEW_MODE == "both"
+  script:
+    - |
+      if python3 "$AI_REVIEW_HOME/gitlab_review.py" already-reviewed --mode json; then exit 0; fi
+    - python3 "$AI_REVIEW_HOME/gitlab_review.py" prepare --out .ai-review
+    - python3 "$AI_REVIEW_HOME/gitlab_review.py" render-prompt "$AI_REVIEW_HOME/prompt-json.md" > .ai-review/prompt.md
+    - |
+      set +e
+      claude -p "$(cat .ai-review/prompt.md)" \
+        --output-format json \
+        --max-turns "$AI_REVIEW_MAX_TURNS" \
+        --strict-mcp-config \
+        --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*)" \
+        --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch" \
+        > .ai-review/claude-output.json
+      echo "claude exit code: $?"
+      set -e
+    - python3 "$AI_REVIEW_HOME/gitlab_review.py" post --mode json --input .ai-review/claude-output.json
+
+# -----------------------------------------------------------------------------
+# 模式 A：agent 透過 GitLab MCP 自己讀、自己留言
+# -----------------------------------------------------------------------------
+ai_review_mcp:
+  extends: .ai_review_base
+  rules:
+    - !reference [.ai_review_skip_rules, rules]
+    - if: $AI_REVIEW_MODE == "mcp" || $AI_REVIEW_MODE == "both"
+  script:
+    - |
+      if python3 "$AI_REVIEW_HOME/gitlab_review.py" already-reviewed --mode mcp; then exit 0; fi
+    - command -v zereight-mcp-gitlab >/dev/null || npm install -g --no-audit --no-fund "@zereight/mcp-gitlab@${GITLAB_MCP_VERSION}"
+    # MCP 設定在 runtime 產生到 /tmp，token 不會進 repo 也不會進 artifacts
+    - python3 "$AI_REVIEW_HOME/gitlab_review.py" mcp-config > /tmp/ai-review-mcp.json
+    - python3 "$AI_REVIEW_HOME/gitlab_review.py" render-prompt "$AI_REVIEW_HOME/prompt-mcp.md" > .ai-review/prompt-mcp.md
+    - |
+      set +e
+      claude -p "$(cat .ai-review/prompt-mcp.md)" \
+        --output-format json \
+        --max-turns "$AI_REVIEW_MAX_TURNS" \
+        --mcp-config /tmp/ai-review-mcp.json --strict-mcp-config \
+        --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*),mcp__gitlab" \
+        --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch" \
+        > .ai-review/claude-output-mcp.json
+      echo "claude exit code: $?"
+      set -e
+    # 檢查 agent 有沒有真的照指示留下總結（沒有就讓 job 顯示黃色警告）
+    - python3 "$AI_REVIEW_HOME/gitlab_review.py" verify --mode mcp

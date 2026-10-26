@@ -1,0 +1,122 @@
+# =============================================================================
+# Codex CLI AI Review for GitLab MR
+#
+#   模式 A「mcp」 ：Codex 透過 GitLab MCP 自己讀 MR／issue、自己留言
+#   模式 B「json」：Codex 只讀 repo、輸出 JSON，由 gitlab_review.py 發留言（建議預設）
+#
+# 用 AI_REVIEW_MODE 切換：json（預設）| mcp | both
+#
+# 需要的 CI/CD variables（勾 Masked）：
+#   LITELLM_API_KEY       LiteLLM 的 virtual key
+#   GITLAB_REVIEW_TOKEN   bot 的 Project/Group Access Token（scope: api，角色 Reporter 以上）
+#
+# 注意：codex exec 與設定檔已用模擬端點驗證，但尚未接真實 GitLab／LiteLLM 跑過，導入前請先用測試 MR 驗證。
+# =============================================================================
+
+variables:
+  AI_REVIEW_MODE: "json"
+  AI_REVIEW_HOME: "$CI_PROJECT_DIR/ai_codereview/common"       # 用自建映像時改成 /opt/ai-review
+  AI_REVIEW_CODEX_DIR: "$CI_PROJECT_DIR/ai_codereview/codex"   # 用自建映像時改成 /opt/ai-review/codex
+  AI_REVIEW_IMAGE: "node:24-bookworm-slim"                     # 內網請改成離線映像 ai-review-codex（見 README）
+  CODEX_VERSION: "0.160.1"                                     # 與 Dockerfile 一致
+  GITLAB_MCP_VERSION: "2.1.69"
+  AI_REVIEW_MODEL: "kimi"                                      # LiteLLM 裡的 model alias
+  AI_REVIEW_LITELLM_BASE: "https://litellm.your-company.internal/v1"
+  # 容器內沙箱起不來時改成 danger-full-access（靠容器隔離 + Reporter token 不能 push）
+  AI_REVIEW_SANDBOX: "read-only"
+  AI_REVIEW_MAX_FINDINGS: "10"
+  AI_REVIEW_MAX_INLINE: "10"
+  AI_REVIEW_MIN_SEVERITY: "medium"
+  AI_REVIEW_FAIL_ON: ""
+  AI_REVIEW_EXCLUDE: "*.lock,package-lock.json,pnpm-lock.yaml,yarn.lock,go.sum,dist/*,build/*,*/generated/*,*.min.js,*.snap"
+
+.codex_review_skip_rules:
+  rules:
+    - if: $CI_PIPELINE_SOURCE != "merge_request_event"
+      when: never
+    - if: $CI_MERGE_REQUEST_LABELS =~ /(^|,)ai-review-skip(,|$)/
+      when: never
+    - if: $CI_MERGE_REQUEST_TITLE =~ /^(\[?Draft\]?:|\(Draft\)|WIP:)/i && $CI_MERGE_REQUEST_LABELS !~ /(^|,)ai-review(,|$)/
+      when: never
+
+.codex_review_base:
+  stage: review
+  image: $AI_REVIEW_IMAGE
+  interruptible: true
+  resource_group: ai-review-$CI_MERGE_REQUEST_IID-$CI_JOB_NAME
+  timeout: 30m                         # Codex 沒有 max-turns，靠 job timeout 控制上限
+  allow_failure: true
+  variables:
+    GIT_DEPTH: "0"
+    CODEX_HOME: "/opt/codex-home"      # 不能放在 /tmp 底下；不會進 artifacts
+    # NODE_EXTRA_CA_CERTS: /etc/ssl/certs/company-ca.pem   # 內部自簽憑證時打開（GitLab MCP 用）
+    # SSL_CERT_FILE: /etc/ssl/certs/company-ca.pem         # Python 與 Codex 用
+  before_script:
+    - |
+      if ! command -v codex >/dev/null || ! command -v python3 >/dev/null; then
+        apt-get update -qq && apt-get install -y -qq --no-install-recommends git python3 ca-certificates >/dev/null
+        npm install -g --no-audit --no-fund "@openai/codex@${CODEX_VERSION}"
+      fi
+    - codex --version
+    - mkdir -p .ai-review "$CODEX_HOME"
+    - cp "$AI_REVIEW_CODEX_DIR/config.toml" "$CODEX_HOME/config.toml"
+  artifacts:
+    when: always
+    expire_in: 14 days
+    paths:
+      - .ai-review/
+
+# -----------------------------------------------------------------------------
+# 模式 B：唯讀 agent → JSON → 程式發留言（建議預設）
+# -----------------------------------------------------------------------------
+codex_review_json:
+  extends: .codex_review_base
+  rules:
+    - !reference [.codex_review_skip_rules, rules]
+    - if: $AI_REVIEW_MODE == "json" || $AI_REVIEW_MODE == "both"
+  script:
+    - |
+      if python3 "$AI_REVIEW_HOME/gitlab_review.py" already-reviewed --mode json; then exit 0; fi
+    - python3 "$AI_REVIEW_HOME/gitlab_review.py" prepare --out .ai-review
+    - python3 "$AI_REVIEW_HOME/gitlab_review.py" render-prompt "$AI_REVIEW_HOME/prompt-json.md" > .ai-review/prompt.md
+    - |
+      set +e
+      codex exec \
+        --sandbox "$AI_REVIEW_SANDBOX" --skip-git-repo-check --ephemeral \
+        -c "model=\"$AI_REVIEW_MODEL\"" \
+        -c "model_providers.litellm.base_url=\"$AI_REVIEW_LITELLM_BASE\"" \
+        -o .ai-review/codex-output.txt \
+        - < .ai-review/prompt.md 2> .ai-review/codex-json.log
+      echo "codex exit code: $?"
+      tail -n 30 .ai-review/codex-json.log
+      set -e
+    - python3 "$AI_REVIEW_HOME/gitlab_review.py" post --mode json --input .ai-review/codex-output.txt
+
+# -----------------------------------------------------------------------------
+# 模式 A：agent 透過 GitLab MCP 自己讀、自己留言
+# -----------------------------------------------------------------------------
+codex_review_mcp:
+  extends: .codex_review_base
+  rules:
+    - !reference [.codex_review_skip_rules, rules]
+    - if: $AI_REVIEW_MODE == "mcp" || $AI_REVIEW_MODE == "both"
+  script:
+    - |
+      if python3 "$AI_REVIEW_HOME/gitlab_review.py" already-reviewed --mode mcp; then exit 0; fi
+    - command -v zereight-mcp-gitlab >/dev/null || npm install -g --no-audit --no-fund "@zereight/mcp-gitlab@${GITLAB_MCP_VERSION}"
+    - cat "$AI_REVIEW_CODEX_DIR/config.mcp.toml" >> "$CODEX_HOME/config.toml"
+    - python3 "$AI_REVIEW_HOME/gitlab_review.py" render-prompt "$AI_REVIEW_HOME/prompt-mcp.md" > .ai-review/prompt-mcp.md
+    - |
+      set +e
+      export GITLAB_API_URL="$CI_API_V4_URL"
+      export GITLAB_PERSONAL_ACCESS_TOKEN="$GITLAB_REVIEW_TOKEN"
+      codex exec \
+        --sandbox "$AI_REVIEW_SANDBOX" --skip-git-repo-check --ephemeral \
+        -c "model=\"$AI_REVIEW_MODEL\"" \
+        -c "model_providers.litellm.base_url=\"$AI_REVIEW_LITELLM_BASE\"" \
+        -o .ai-review/codex-output-mcp.txt \
+        - < .ai-review/prompt-mcp.md 2> .ai-review/codex-mcp.log
+      echo "codex exit code: $?"
+      tail -n 30 .ai-review/codex-mcp.log
+      set -e
+    - python3 "$AI_REVIEW_HOME/gitlab_review.py" verify --mode mcp
