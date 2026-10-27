@@ -22,9 +22,13 @@ data:
   workspace.yaml: |
     load_from:
       - grpc_server:
-          location_name: "example-etl"
-          host: "example-etl"
+          location_name: "hello-world"
+          host: "hello-world"
           port: 3030
+      # - grpc_server:
+      #     location_name: "example-etl"
+      #     host: "example-etl"
+      #     port: 3030
       # - grpc_server:
       #     location_name: "alice-etl"
       #     host: "alice-etl"

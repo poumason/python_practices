@@ -15,12 +15,34 @@
 dagster-helm/
 ├── README.md
 ├── values-dagster.yaml              # 主 chart：webserver + daemon + instance 設定
+├── values-local-test.yaml           # 本機驗證用 overlay（見下方「本機安裝驗證」）
 ├── workspace-configmap.yaml         # code location 清單（由維護者管理）
 ├── secrets.example.yaml             # Secret 範本（勿放真實密碼）
+├── charts/                          # 已 vendor 進來的官方 chart（見下方版本說明）
+│   ├── dagster/                     # dagster/dagster，CHART_VERSION=1.13.26
+│   └── dagster-user-deployments/    # dagster/dagster-user-deployments，CHART_VERSION=1.13.26
 └── user-deployments/
     ├── values-example.yaml          # 開發者 code location 範本
     └── Dockerfile.base              # code location 共用 base image
 ```
+
+### `charts/` 是怎麼來的
+
+這兩個目錄是用 `helm pull --untar` 從官方 repo 抓下來、直接 commit 進版控的，不是 git submodule：
+
+```bash
+helm repo add dagster https://dagster-io.github.io/helm
+helm repo update dagster
+
+helm pull dagster/dagster --version 1.13.26 \
+  --untar --untardir charts
+helm pull dagster/dagster-user-deployments --version 1.13.26 \
+  --untar --untardir charts
+```
+
+`charts/dagster` 裡面已經把 `dagster-user-deployments`、`postgresql`、`rabbitmq`、`redis` 都當 subchart 打包進去了（見 `charts/dagster/Chart.yaml` 的 `dependencies`），所以主 chart 不需要額外 `helm dependency build`。獨立的 `charts/dagster-user-deployments` 是給每個開發者各自 `helm install` 用的（見下方部署順序第 5 步）。
+
+**升級版本**：改版本號重新執行上面兩個 `helm pull`，覆蓋掉 `charts/` 裡的內容，再對照 `values-dagster.yaml` / `user-deployments/values-*.yaml` 的鍵名是否變動（下方「版本提醒」）。
 
 ## 架構
 
@@ -77,25 +99,49 @@ kubectl -n dagster create secret generic dagster-postgresql-secret \
 # 2. Workspace ConfigMap
 kubectl apply -f workspace-configmap.yaml
 
-# 3. 檢查主 chart 產出的 manifest
-helm template dagster dagster/dagster -n dagster \
-  --version <CHART_VERSION> -f values-dagster.yaml > rendered.yaml
+# 3. 檢查主 chart 產出的 manifest（用 charts/ 裡 vendor 進來的 chart，不用額外加 repo）
+helm template dagster ./charts/dagster -n dagster \
+  -f values-dagster.yaml > rendered.yaml
 
 # 4. 安裝主 chart
-helm upgrade --install dagster dagster/dagster \
-  -n dagster --version <CHART_VERSION> -f values-dagster.yaml
+helm upgrade --install dagster ./charts/dagster \
+  -n dagster -f values-dagster.yaml
 
 # 5. 安裝 code location
-helm upgrade --install example-etl dagster/dagster-user-deployments \
-  -n dagster --version <CHART_VERSION> \
-  -f user-deployments/values-example.yaml
+helm upgrade --install example-etl ./charts/dagster-user-deployments \
+  -n dagster -f user-deployments/values-example.yaml
 ```
+
+若偏好不 vendor、改用官方 repo，把 `./charts/dagster`、`./charts/dagster-user-deployments` 換成 `dagster/dagster`、`dagster/dagster-user-deployments` 並加回 `--version <CHART_VERSION>` 即可，兩種方式的 values 檔完全相容。
 
 第 3 步請確認：
 
 - 沒有產生任何 CronJob、Job，也沒有建立 Job 的 RBAC 權限
 - 沒有 PostgreSQL StatefulSet
 - instance ConfigMap 中 `run_launcher` 為 `DefaultRunLauncher`，`run_coordinator` 為 `QueuedRunCoordinator`
+
+## 本機安裝驗證
+
+`values-dagster.yaml` 預設接公司既有 PostgreSQL（`postgresql.enabled: false` + 外部 host），在本機測試叢集（kind/minikube）上沒有那個 DB，所以多加了 `values-local-test.yaml` 這個 overlay，只覆蓋 `postgresql.postgresqlHost`，其他設定（DefaultRunLauncher、QueuedRunCoordinator、外部 workspace ConfigMap）完全沿用主 values 檔，驗證的就是真正會上線的設定：
+
+```bash
+# 在本機叢集起一個陽春 postgres 當作「公司既有 DB」的替身
+# （不要用 chart 內建的 postgresql subchart：bitnami 已把舊版 image tag 下架，
+#  預設值會直接 pull 失敗）
+kubectl create ns dagster
+kubectl -n dagster create secret generic dagster-postgresql-secret \
+  --from-literal=postgresql-password='<你自己的測試密碼>'
+# 自己起一個 postgres:16 Deployment + Service，命名為 local-postgres
+
+kubectl apply -f workspace-configmap.yaml
+
+helm upgrade --install dagster ./charts/dagster -n dagster \
+  -f values-dagster.yaml -f values-local-test.yaml
+
+kubectl -n dagster get pods   # 應該只有 webserver + daemon，沒有 CronJob/Job
+```
+
+已在本機 `kind` 叢集跑過一次：`dagster-dagster-webserver`、`dagster-daemon` 都正常 `Running`，`/server_info` 健康檢查回 200，過程沒有產生任何 CronJob 或額外的 Job（符合「不使用 K8sRunLauncher」的設計前提）。`example-etl` code location 因為 `user-deployments/values-example.yaml` 裡的 image 是未建置的 placeholder（`registry.internal/team/example-etl:v1.0.0`），不在這次驗證範圍內——要驗證 code location，得先用 `user-deployments/Dockerfile.base` 建一個真的 `example_etl` image 並 load 進本機叢集。
 
 ## 驗證清單
 

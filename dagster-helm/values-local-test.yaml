@@ -1,0 +1,34 @@
+# =============================================================================
+# 本機驗證用 overlay（疊加在 values-dagster.yaml 之上）
+#
+#   helm upgrade --install dagster ./charts/dagster -n dagster \
+#     -f values-dagster.yaml -f values-local-test.yaml
+#
+# 只用於在本機 kind/minikube 等測試叢集上驗證 values-dagster.yaml 的設計
+# （DefaultRunLauncher、QueuedRunCoordinator、外部 workspace ConfigMap）。
+#
+# 不使用 chart 內建的 PostgreSQL subchart：bitnami 已把舊版 tag 下架，
+# 預設值會抓不到 image。改成在叢集裡起一個陽春的 postgres:16 當作「公司既有 DB」
+# 的替身，驗證方式和正式環境一致（postgresql.enabled=false + 外部 host）。
+#
+# 正式環境請勿套用此檔，只把 postgresqlHost 換成公司的 DB。
+# =============================================================================
+
+postgresql:
+  postgresqlHost: "local-postgres.dagster.svc.cluster.local"
+
+# -----------------------------------------------------------------------------
+# 本機 kind 叢集已經裝了 ingress-nginx（IngressClass: nginx），node 的
+# 80/443 直接 docker port-mapping 到 host，所以不用 port-forward，
+# 裝完直接開 http://dagster-web.localhost 就能連到 webserver。
+# -----------------------------------------------------------------------------
+ingress:
+  enabled: true
+  ingressClassName: "nginx"
+  dagsterWebserver:
+    host: "dagster-web.localhost"
+    # chart 預設 path 是 "/*"，ingress-nginx 在沒有額外的
+    # use-regex annotation 時會把它當成字面路徑，不會真的做前綴比對，
+    # 導致除了剛好叫 "/*" 的路徑外全部 404。改成標準的 Prefix "/" 即可。
+    path: "/"
+    pathType: Prefix

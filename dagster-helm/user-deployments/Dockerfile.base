@@ -19,9 +19,17 @@ ARG DAGSTER_VERSION
 
 # dagster-postgres：run 在 code location Pod 內執行，需要寫入 DB
 # dagster-aws：若 compute log 使用 S3 / MinIO
+# sqlalchemy<2.1：和官方 dagster/dagster-celery-k8s image 使用的版本對齊
+#   （2.0.x）。dagster-postgres 只固定了 psycopg2-binary；但 SQLAlchemy 2.1+
+#   把 "postgresql://"（不帶 +driver）的預設 dialect 從 psycopg2 換成了
+#   psycopg（v3）。不裝 psycopg v3 的話會直接 ModuleNotFoundError；裝了的話，
+#   NOTIFY run_events 這類原生 SQL 在 psycopg v3 下又會噴
+#   "syntax error at or near $1"（參數繫結方式不相容）。兩邊都繞不開，
+#   所以直接鎖 SQLAlchemy 版本，讓它跟官方 image 一樣用 psycopg2。
 RUN pip install --no-cache-dir \
       "dagster==${DAGSTER_VERSION}" \
       "dagster-postgres" \
-      "dagster-aws"
+      "dagster-aws" \
+      "sqlalchemy<2.1"
 
 WORKDIR /opt/dagster/app
