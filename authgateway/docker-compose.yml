@@ -1,0 +1,47 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: authgateway
+      POSTGRES_PASSWORD: authgateway
+      POSTGRES_DB: authgateway
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U authgateway"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mock-sso:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: uvicorn mock_sso.main:app --host 0.0.0.0 --port 9000
+    ports:
+      - "9000:9000"
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: >
+      sh -c "python scripts/gen_keys.py &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    environment:
+      DATABASE_URL: postgresql://authgateway:authgateway@db:5432/authgateway
+      # iss claim 裡的值是 mock_sso 內部寫死的 http://localhost:9000，
+      # 和「去哪裡抓 JWKS」是兩件事：JWKS_URL 用 compose 內部可解析的 host。
+      SSO_ISSUER: http://localhost:9000
+      SSO_JWKS_URL: http://mock-sso:9000/.well-known/jwks.json
+      SSO_AUDIENCE: authgateway
+      OWN_ISSUER: http://localhost:8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      mock-sso:
+        condition: service_started
