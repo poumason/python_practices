@@ -21,6 +21,12 @@ async def _get_active_client(client_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+async def _is_jti_revoked(jti: str) -> bool:
+    pool = get_pool()
+    row = await pool.fetchrow("SELECT 1 FROM revoked_jti WHERE jti = $1", jti)
+    return row is not None
+
+
 async def resolve_principal(token: str) -> Principal:
     issuer = peek_issuer(token)
 
@@ -33,6 +39,8 @@ async def resolve_principal(token: str) -> Principal:
         client = await _get_active_client(claims["client_id"])
         if client is None or client["status"] != "active":
             raise AuthError(f"client {claims['client_id']} is disabled or unknown")
+        if await _is_jti_revoked(claims["jti"]):
+            raise AuthError(f"token {claims['jti']} has been revoked")
         return Principal(type="system", id=claims["client_id"], claims=claims)
 
     raise AuthError(f"unrecognized token issuer: {issuer!r}")

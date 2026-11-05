@@ -88,5 +88,5 @@ TEST_DATABASE_URL=postgresql://authgateway:authgateway@localhost:55432/authgatew
   - Header `X-Admin-Api-Key: <ADMIN_API_KEY>`，方便 CI/腳本呼叫；沒設定這個 env 就停用這個後門
   - Header `Authorization: Bearer <公司 SSO id_token>`，`sub` 要在 `ADMIN_USER_IDS`（逗號分隔）允許清單內
 - ✅ `client_secret` 以外，已支援 `private_key_jwt`：建立 client 時帶 `public_key` 就會走這個模式，不產生/回傳 `client_secret`。換 token 時改帶 `client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer` + `client_assertion=<client 自己簽的短效 JWT>`，細節見 [`app/security/client_assertion.py`](app/security/client_assertion.py)、`scripts/demo_private_key_jwt.py`
-- `access_token` 目前靠短效期 + `clients.status` 做輕量撤銷，流量大/敏感度高的話可以加 `jti` 黑名單做即時撤銷
+- ✅ `access_token` 除了短效期 + `clients.status`，現在可以用 `POST /admin/tokens/{jti}/revoke` 單獨撤銷一個 token（不用停用整個 client）。`jti` 從 token 的 payload 解出來即可（不用驗簽，撤銷操作本身不需要信任 token 內容）
 - `mock_sso/` 僅供測試，正式環境把 `SSO_ISSUER` / `SSO_JWKS_URL` / `SSO_AUDIENCE` 指到公司真正的 SSO 即可，驗證邏輯不用改
