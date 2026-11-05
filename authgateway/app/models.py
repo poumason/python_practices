@@ -15,12 +15,14 @@ class TokenResponse(BaseModel):
 
 class CreateClientRequest(BaseModel):
     name: str
+    public_key: str | None = None  # 給了就走 private_key_jwt，不產生 client_secret
 
 
 class CreateClientResponse(BaseModel):
     client_id: str
-    client_secret: str
+    client_secret: str | None = None  # 走 private_key_jwt 註冊時不會有這個欄位
     name: str
+    auth_method: str  # "client_secret" | "private_key_jwt"
 
 
 class AuthorizeResponse(BaseModel):

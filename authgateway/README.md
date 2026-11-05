@@ -41,6 +41,8 @@ python scripts/demo_flow.py
 1. 建立一個 system client → 換 token → 未授權時 403 → 授權後 200 → 停用 client 後舊 token 變 401
 2. 用 mock SSO 登入 `alice` 換 `id_token` → 未授權時 403 → 授權後 200
 
+另外還有 `python scripts/demo_private_key_jwt.py`，示範用 `private_key_jwt`（client 自己簽 JWT 換 token，不用 `client_secret`）的流程，包含 replay 被擋下來。
+
 ### 3. 單獨用 curl 玩
 
 `/admin/*` 需要管理權限（見下方「安全注意事項」），demo 的 docker-compose 已經設了 `ADMIN_API_KEY=demo-admin-api-key`：
@@ -85,6 +87,6 @@ TEST_DATABASE_URL=postgresql://authgateway:authgateway@localhost:55432/authgatew
 - ✅ `/admin/*` 管理端點：已加上管理權限驗證，見 [`app/auth/admin.py`](app/auth/admin.py)。支援兩種方式（任一通過即可）：
   - Header `X-Admin-Api-Key: <ADMIN_API_KEY>`，方便 CI/腳本呼叫；沒設定這個 env 就停用這個後門
   - Header `Authorization: Bearer <公司 SSO id_token>`，`sub` 要在 `ADMIN_USER_IDS`（逗號分隔）允許清單內
-- `client_secret` 目前用 bcrypt hash 存，建議正式環境改成 `private_key_jwt`（client 用自己私鑰簽 JWT 來換 token），secret 完全不落地傳輸
+- ✅ `client_secret` 以外，已支援 `private_key_jwt`：建立 client 時帶 `public_key` 就會走這個模式，不產生/回傳 `client_secret`。換 token 時改帶 `client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer` + `client_assertion=<client 自己簽的短效 JWT>`，細節見 [`app/security/client_assertion.py`](app/security/client_assertion.py)、`scripts/demo_private_key_jwt.py`
 - `access_token` 目前靠短效期 + `clients.status` 做輕量撤銷，流量大/敏感度高的話可以加 `jti` 黑名單做即時撤銷
 - `mock_sso/` 僅供測試，正式環境把 `SSO_ISSUER` / `SSO_JWKS_URL` / `SSO_AUDIENCE` 指到公司真正的 SSO 即可，驗證邏輯不用改

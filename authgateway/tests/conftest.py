@@ -125,7 +125,9 @@ async def clean_db(test_app):
 
     pool = get_pool()
     async with pool.acquire() as conn:
-        await conn.execute("TRUNCATE system_agent_auth, user_agent_auth, clients CASCADE")
+        await conn.execute(
+            "TRUNCATE system_agent_auth, user_agent_auth, used_client_assertions, clients CASCADE"
+        )
     yield
 
 

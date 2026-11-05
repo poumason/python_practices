@@ -16,10 +16,20 @@ router = APIRouter(prefix="/admin/clients", tags=["admin"], dependencies=[Depend
 @router.post("", response_model=CreateClientResponse)
 async def create_client(body: CreateClientRequest):
     client_id = f"client-{secrets.token_hex(6)}"
+    pool = get_pool()
+
+    if body.public_key:
+        # private_key_jwt：client 自己保管私鑰，這裡只存 public key，不產生 secret
+        await pool.execute(
+            "INSERT INTO clients (client_id, name, public_key) VALUES ($1, $2, $3)",
+            client_id,
+            body.name,
+            body.public_key,
+        )
+        return CreateClientResponse(client_id=client_id, name=body.name, auth_method="private_key_jwt")
+
     client_secret = secrets.token_urlsafe(32)
     secret_hash = hash_secret(client_secret)
-
-    pool = get_pool()
     await pool.execute(
         "INSERT INTO clients (client_id, client_secret_hash, name) VALUES ($1, $2, $3)",
         client_id,
@@ -28,7 +38,9 @@ async def create_client(body: CreateClientRequest):
     )
 
     # client_secret 只在這裡回傳一次，之後查不到明文
-    return CreateClientResponse(client_id=client_id, client_secret=client_secret, name=body.name)
+    return CreateClientResponse(
+        client_id=client_id, client_secret=client_secret, name=body.name, auth_method="client_secret"
+    )
 
 
 @router.post("/{client_id}/disable")
