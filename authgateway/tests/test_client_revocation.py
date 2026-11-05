@@ -1,5 +1,7 @@
-async def test_disabled_client_token_rejected(client):
-    created = (await client.post("/admin/clients", json={"name": "revoke-me"})).json()
+async def test_disabled_client_token_rejected(client, admin_headers):
+    created = (
+        await client.post("/admin/clients", json={"name": "revoke-me"}, headers=admin_headers)
+    ).json()
     client_id = created["client_id"]
 
     token = (
@@ -16,6 +18,7 @@ async def test_disabled_client_token_rejected(client):
     await client.post(
         f"/admin/clients/{client_id}/authorize-agent",
         params={"agent_id": "agent-1", "permission": "read"},
+        headers=admin_headers,
     )
 
     ok_resp = await client.get(
@@ -24,7 +27,7 @@ async def test_disabled_client_token_rejected(client):
     )
     assert ok_resp.status_code == 200
 
-    disable_resp = await client.post(f"/admin/clients/{client_id}/disable")
+    disable_resp = await client.post(f"/admin/clients/{client_id}/disable", headers=admin_headers)
     assert disable_resp.status_code == 200
 
     revoked_resp = await client.get(

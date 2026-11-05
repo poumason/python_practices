@@ -1,9 +1,10 @@
 """Demo 用：直接幫 user 開一條對某個 agent 的授權，模擬管理員設定授權表。"""
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from app.auth.admin import require_admin
 from app.db import get_pool
 
-router = APIRouter(prefix="/admin/users", tags=["admin"])
+router = APIRouter(prefix="/admin/users", tags=["admin"], dependencies=[Depends(require_admin)])
 
 
 @router.post("/{user_id}/authorize-agent")

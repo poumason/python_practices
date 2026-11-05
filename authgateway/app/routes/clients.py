@@ -3,13 +3,14 @@ Demo 用，正式環境應該加上管理權限驗證（例如只允許內部管
 """
 import secrets
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from app.auth.admin import require_admin
 from app.db import get_pool
 from app.models import CreateClientRequest, CreateClientResponse
 from app.security.secrets_utils import hash_secret
 
-router = APIRouter(prefix="/admin/clients", tags=["admin"])
+router = APIRouter(prefix="/admin/clients", tags=["admin"], dependencies=[Depends(require_admin)])
 
 
 @router.post("", response_model=CreateClientResponse)

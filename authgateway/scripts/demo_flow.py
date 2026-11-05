@@ -1,22 +1,25 @@
 """端到端跑一次 user 流程與 system 流程，驗證整個設計可以正常運作。
 
 前提：docker compose up -d 已經啟動 postgres / mock-sso / app，
-且已套用 migrations/001_init.sql。
+且已套用 migrations/ 下所有 SQL。
 
 用法：
     python scripts/demo_flow.py
 """
+import os
+
 import httpx
 
 GATEWAY = "http://localhost:8000"
 MOCK_SSO = "http://localhost:9000"
 AGENT_ID = "agent-42"
+ADMIN_HEADERS = {"X-Admin-Api-Key": os.environ.get("ADMIN_API_KEY", "demo-admin-api-key")}
 
 
 def run_system_flow(client: httpx.Client) -> None:
     print("\n=== System (M2M) 流程 ===")
 
-    resp = client.post(f"{GATEWAY}/admin/clients", json={"name": "demo-system"})
+    resp = client.post(f"{GATEWAY}/admin/clients", json={"name": "demo-system"}, headers=ADMIN_HEADERS)
     resp.raise_for_status()
     created = resp.json()
     client_id, client_secret = created["client_id"], created["client_secret"]
@@ -33,13 +36,17 @@ def run_system_flow(client: httpx.Client) -> None:
     resp = client.get(f"{GATEWAY}/v1/agents/{AGENT_ID}/authorize", headers={"Authorization": f"Bearer {token}"})
     print(f"尚未授權前呼叫 authorize -> {resp.status_code} (預期 403)")
 
-    client.post(f"{GATEWAY}/admin/clients/{client_id}/authorize-agent", params={"agent_id": AGENT_ID, "permission": "read"}).raise_for_status()
+    client.post(
+        f"{GATEWAY}/admin/clients/{client_id}/authorize-agent",
+        params={"agent_id": AGENT_ID, "permission": "read"},
+        headers=ADMIN_HEADERS,
+    ).raise_for_status()
     print(f"已授權 {client_id} 可操作 {AGENT_ID}")
 
     resp = client.get(f"{GATEWAY}/v1/agents/{AGENT_ID}/authorize", headers={"Authorization": f"Bearer {token}"})
     print(f"授權後再呼叫 authorize -> {resp.status_code} {resp.json()} (預期 200)")
 
-    client.post(f"{GATEWAY}/admin/clients/{client_id}/disable").raise_for_status()
+    client.post(f"{GATEWAY}/admin/clients/{client_id}/disable", headers=ADMIN_HEADERS).raise_for_status()
     print(f"停用 client {client_id}")
 
     resp = client.get(f"{GATEWAY}/v1/agents/{AGENT_ID}/authorize", headers={"Authorization": f"Bearer {token}"})
@@ -57,7 +64,11 @@ def run_user_flow(client: httpx.Client) -> None:
     resp = client.get(f"{GATEWAY}/v1/agents/{AGENT_ID}/authorize", headers={"Authorization": f"Bearer {id_token}"})
     print(f"尚未授權前呼叫 authorize -> {resp.status_code} (預期 403)")
 
-    client.post(f"{GATEWAY}/admin/users/alice/authorize-agent", params={"agent_id": AGENT_ID, "permission": "write"}).raise_for_status()
+    client.post(
+        f"{GATEWAY}/admin/users/alice/authorize-agent",
+        params={"agent_id": AGENT_ID, "permission": "write"},
+        headers=ADMIN_HEADERS,
+    ).raise_for_status()
     print(f"已授權 alice 可操作 {AGENT_ID}")
 
     resp = client.get(f"{GATEWAY}/v1/agents/{AGENT_ID}/authorize", headers={"Authorization": f"Bearer {id_token}"})

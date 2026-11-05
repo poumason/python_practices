@@ -43,16 +43,21 @@ python scripts/demo_flow.py
 
 ### 3. 單獨用 curl 玩
 
-```bash
-# 建立 system client
-curl -s -X POST localhost:8000/admin/clients -H 'content-type: application/json' -d '{"name":"demo"}'
+`/admin/*` 需要管理權限（見下方「安全注意事項」），demo 的 docker-compose 已經設了 `ADMIN_API_KEY=demo-admin-api-key`：
 
-# 用 client_credentials 換 token
+```bash
+# 建立 system client（帶 admin api key）
+curl -s -X POST localhost:8000/admin/clients \
+  -H 'content-type: application/json' -H 'X-Admin-Api-Key: demo-admin-api-key' \
+  -d '{"name":"demo"}'
+
+# 用 client_credentials 換 token（這個端點不需要 admin 權限，client 自己的 secret 就是身份）
 curl -s -X POST localhost:8000/oauth/token \
   -d grant_type=client_credentials -d client_id=<client_id> -d client_secret=<client_secret>
 
 # 幫這個 client 開一條對 agent-42 的授權
-curl -s -X POST "localhost:8000/admin/clients/<client_id>/authorize-agent?agent_id=agent-42&permission=read"
+curl -s -X POST "localhost:8000/admin/clients/<client_id>/authorize-agent?agent_id=agent-42&permission=read" \
+  -H 'X-Admin-Api-Key: demo-admin-api-key'
 
 # 呼叫授權檢查
 curl -s localhost:8000/v1/agents/agent-42/authorize -H "Authorization: Bearer <access_token>"
@@ -77,7 +82,9 @@ TEST_DATABASE_URL=postgresql://authgateway:authgateway@localhost:55432/authgatew
 
 ## 安全注意事項（demo 之外，正式導入前要做）
 
-- `/admin/*` 管理端點目前完全沒有保護，正式環境要加上管理者專屬的驗證（例如只接受內部管理者的 id_token，或額外的管理 API key）
+- ✅ `/admin/*` 管理端點：已加上管理權限驗證，見 [`app/auth/admin.py`](app/auth/admin.py)。支援兩種方式（任一通過即可）：
+  - Header `X-Admin-Api-Key: <ADMIN_API_KEY>`，方便 CI/腳本呼叫；沒設定這個 env 就停用這個後門
+  - Header `Authorization: Bearer <公司 SSO id_token>`，`sub` 要在 `ADMIN_USER_IDS`（逗號分隔）允許清單內
 - `client_secret` 目前用 bcrypt hash 存，建議正式環境改成 `private_key_jwt`（client 用自己私鑰簽 JWT 來換 token），secret 完全不落地傳輸
 - `access_token` 目前靠短效期 + `clients.status` 做輕量撤銷，流量大/敏感度高的話可以加 `jti` 黑名單做即時撤銷
 - `mock_sso/` 僅供測試，正式環境把 `SSO_ISSUER` / `SSO_JWKS_URL` / `SSO_AUDIENCE` 指到公司真正的 SSO 即可，驗證邏輯不用改

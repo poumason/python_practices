@@ -1,8 +1,8 @@
 import jwt
 
 
-async def test_client_credentials_issues_token(client):
-    create_resp = await client.post("/admin/clients", json={"name": "test-system"})
+async def test_client_credentials_issues_token(client, admin_headers):
+    create_resp = await client.post("/admin/clients", json={"name": "test-system"}, headers=admin_headers)
     assert create_resp.status_code == 200
     created = create_resp.json()
 
@@ -23,8 +23,8 @@ async def test_client_credentials_issues_token(client):
     assert claims["iss"] == "http://testserver"
 
 
-async def test_wrong_secret_is_rejected(client):
-    create_resp = await client.post("/admin/clients", json={"name": "test-system"})
+async def test_wrong_secret_is_rejected(client, admin_headers):
+    create_resp = await client.post("/admin/clients", json={"name": "test-system"}, headers=admin_headers)
     created = create_resp.json()
 
     token_resp = await client.post(

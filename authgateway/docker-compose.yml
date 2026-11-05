@@ -38,6 +38,8 @@ services:
       SSO_JWKS_URL: http://mock-sso:9000/.well-known/jwks.json
       SSO_AUDIENCE: authgateway
       OWN_ISSUER: http://localhost:8000
+      ADMIN_API_KEY: demo-admin-api-key
+      ADMIN_USER_IDS: bob
     ports:
       - "8000:8000"
     depends_on:

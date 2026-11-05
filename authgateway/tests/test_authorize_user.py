@@ -8,12 +8,13 @@ async def test_user_without_authorization_gets_403(client, id_token_factory):
     assert resp.status_code == 403
 
 
-async def test_user_with_authorization_gets_200(client, id_token_factory):
+async def test_user_with_authorization_gets_200(client, id_token_factory, admin_headers):
     id_token = await id_token_factory("alice")
 
     await client.post(
         "/admin/users/alice/authorize-agent",
         params={"agent_id": "agent-1", "permission": "write"},
+        headers=admin_headers,
     )
 
     resp = await client.get(

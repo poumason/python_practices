@@ -13,7 +13,7 @@ import uvicorn
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-MIGRATIONS_FILE = Path(__file__).parent.parent / "migrations" / "001_init.sql"
+MIGRATIONS_DIR = Path(__file__).parent.parent / "migrations"
 
 
 def _free_port() -> int:
@@ -85,6 +85,8 @@ def app_env(tmp_path_factory, mock_sso_server):
     os.environ["PUBLIC_KEY_PATH"] = str(public_path)
     os.environ["KEY_ID"] = "test-key-1"
     os.environ["ACCESS_TOKEN_TTL_SECONDS"] = "1800"
+    os.environ["ADMIN_API_KEY"] = "test-admin-api-key"
+    os.environ["ADMIN_USER_IDS"] = "bob"  # mock_sso 內建帳號，當測試用的 admin 身份
     return key_dir
 
 
@@ -97,7 +99,8 @@ def migrated_db(app_env):
         pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
         try:
             async with pool.acquire() as conn:
-                await conn.execute(MIGRATIONS_FILE.read_text())
+                for sql_file in sorted(MIGRATIONS_DIR.glob("*.sql")):
+                    await conn.execute(sql_file.read_text())
         finally:
             await pool.close()
 
@@ -131,6 +134,11 @@ async def client(test_app):
     transport = httpx.ASGITransport(app=test_app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as c:
         yield c
+
+
+@pytest.fixture
+def admin_headers(app_env):
+    return {"X-Admin-Api-Key": os.environ["ADMIN_API_KEY"]}
 
 
 @pytest_asyncio.fixture
