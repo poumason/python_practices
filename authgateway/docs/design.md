@@ -168,9 +168,17 @@ async def check_authorization(principal, agent_id):
 
 兩種身份用同一個欄位命名規則，稽核系統（log 收集、告警規則）不需要為 system 另外寫一套解析邏輯。
 
-## 8. 公司 SSO 的替換方式
+## 8. 安全加固：admin 權限、private_key_jwt、jti 撤銷
 
-Demo 用 [`mock_sso/`](../mock_sso/) 模擬一個極簡 OIDC issuer（`POST /mock-login` 換 `id_token`、`GET /.well-known/jwks.json` 給 public key）。正式環境只要把三個環境變數指到真正的公司 SSO：
+延續第 9 節原本列的三項「已知限制」，後續補上了：
+
+- **`/admin/*` 管理權限**（[`app/auth/admin.py`](../app/auth/admin.py)）：`require_admin` dependency 支援靜態 `X-Admin-Api-Key`（給 CI/腳本）跟公司 SSO 的 admin id_token allowlist（`ADMIN_USER_IDS`）兩種，任一通過即可，掛在 `app/routes/clients.py`、`app/routes/users.py`、`app/routes/tokens.py` 上
+- **`private_key_jwt`**（[`app/security/client_assertion.py`](../app/security/client_assertion.py)）：建立 client 時可以只給 `public_key`，不產生 `client_secret`；換 token 改用 client 自己簽的短效 JWT assertion（`client_assertion` + RFC 7523 的 `client_assertion_type`），驗證 `iss==sub==client_id`、簽章、`aud` 指向本服務的 `/oauth/token`、assertion TTL 上限 5 分鐘，並用 `used_client_assertions` 表擋 replay
+- **`jti` 單一撤銷**（[`app/routes/tokens.py`](../app/routes/tokens.py)）：`POST /admin/tokens/{jti}/revoke` 把 jti 寫進 `revoked_jti` 表，`resolve_principal` 驗證 system token 時會多查一次這張表；跟「停用整個 client」是互相獨立的兩個撤銷層級，可以只擋一個被盜用的 token，不影響同一個 client 的其他合法 token
+
+## 9. 公司 SSO 的替換方式
+
+Demo 用 [`mock_sso/`](../mock_sso/) 模擬一個極簡 OIDC issuer（`POST /mock-login` 換 `id_token`、`GET /.well-known/jwks.json` 給 public key）。`app/auth/principal.py` 跟 `app/security/jwt_utils.py` 完全不用改，因為一開始就是照通用 OIDC 的驗證規則寫的（驗簽、`iss`、`aud`、`exp`），不是綁死 mock SSO 的實作細節，正式環境只是換三個環境變數：
 
 ```
 SSO_ISSUER=https://sso.yourcompany.com
@@ -178,11 +186,16 @@ SSO_JWKS_URL=https://sso.yourcompany.com/.well-known/jwks.json
 SSO_AUDIENCE=<AuthGateway 在 SSO 上註冊的 client_id>
 ```
 
-`app/auth/principal.py` 跟 `app/security/jwt_utils.py` 完全不用改，因為一開始就是照通用 OIDC 的驗證規則寫的（驗簽、`iss`、`aud`、`exp`），不是綁死 mock SSO 的實作細節。
+換裝前跟公司 SSO 團隊確認這份檢查清單：
 
-## 9. 已知限制 / 正式導入前要補的
+1. **拿正確的 issuer / JWKS 位置**：跟 SSO 團隊要 `.well-known/openid-configuration`，裡面的 `issuer` 填 `SSO_ISSUER`、`jwks_uri` 填 `SSO_JWKS_URL`。不要自己猜網址，兩者有時候不是同一個 host（例如 JWKS 放在 CDN 後面）
+2. **確認 AuthGateway 的 audience**：AuthGateway 要先在公司 SSO 上註冊成一個 client/resource，拿到的識別字串填 `SSO_AUDIENCE`，要跟 id_token 的 `aud` claim 完全一致
+3. **確認簽章演算法**：現在程式寫死只接受 `RS256`（見 `verify_company_id_token` 的 `algorithms=["RS256"]`）。如果公司 SSO 用 `ES256`/`PS256` 等其他演算法，要同步改這裡，不要為了「先跑起來」直接把 `algorithms` 開放成全部允許
+4. **確認時間誤差容忍度**：目前驗證用 `pyjwt` 預設 `leeway=0`，完全不允許 AuthGateway 跟公司 SSO 的機器時間有落差。如果兩邊時間同步沒有嚴格保證（沒有 NTP、跨資料中心時差），要評估加一點 `leeway`
+5. **拿掉 mock SSO**：正式部署不要啟動 `mock_sso/` 這個服務，`docker-compose.yml` 裡的 `mock-sso` service 只在本機/測試環境用
 
-- `/admin/*` 系列端點目前沒有任何權限保護，純粹為了讓 demo 可以跑；正式環境要加上「誰可以建立/停用 client、誰可以設定授權表」的管理權限
-- Client 身份驗證目前用 `client_secret`（bcrypt hash），正式環境建議加上 `private_key_jwt` 選項：client 用自己的私鑰簽一段短效 JWT 來換 token，secret 完全不在網路上傳輸，輪換也更容易
-- 撤銷目前只靠「查 `clients.status`」，沒有做 `jti` 黑名單；如果有「單次 token 被盜用就要立刻擋掉、但 client 本身還是合法」的需求，要再加一張 revoked_jti 表
+## 10. 已知限制
+
+- `/admin/*` 的管理權限、`private_key_jwt`、`jti` 單一撤銷都已經做了（見 `app/auth/admin.py`、`app/security/client_assertion.py`、`app/routes/tokens.py`），不是只能靠停用整個 client
 - JWKS 目前是即時從公司 SSO 抓、記憶體快取 5 分鐘；正式環境流量大的話可以考慮背景排程預先刷新，避免快取過期那一刻的請求打去源站
+- `used_client_assertions`、`revoked_jti` 兩張表目前沒有自動清理過期資料的排程，長期跑下去表會一直長大（雖然每筆資料都有 `expires_at`，之後可以加一個定期 `DELETE WHERE expires_at < now()` 的排程任務）
