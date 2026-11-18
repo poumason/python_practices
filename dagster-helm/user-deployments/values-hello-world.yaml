@@ -1,0 +1,36 @@
+# =============================================================================
+# hello-world code location（dagster/dagster-user-deployments）
+#
+# 最小可動範例：一個 hello_world_op + hello_world_job，用來驗證
+# 「本機 build image → load 進叢集 → deploy → 從 UI 執行」的完整流程。
+# 原始碼見 ./hello-world/hello_world/definitions.py
+#
+#   helm upgrade --install hello-world ./charts/dagster-user-deployments \
+#     -n dagster -f user-deployments/values-hello-world.yaml
+# =============================================================================
+
+global:
+  # 必須和主 chart 相同
+  postgresqlSecretName: "dagster-postgresql-secret"
+
+deployments:
+  - name: "hello-world"     # 必須和 workspace 的 host / location_name 一致
+    image:
+      repository: "hello-world-code"
+      tag: "latest"
+      # 本機 kind 叢集：image 是用 `kind load docker-image` 直接塞進節點的，
+      # 不是從 registry 拉，所以要用 Never，否則 kubelet 會嘗試去 pull 而失敗
+      pullPolicy: Never
+
+    dagsterApiGrpcArgs:
+      - "-m"
+      - "hello_world.definitions"
+    port: 3030
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 250m
+        memory: 512Mi
