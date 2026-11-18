@@ -1,0 +1,37 @@
+# Both containers share one network namespace (same localhost), so B
+# reaches the sidecar at localhost:8080 with no Service/DNS needed.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sidecar-header-proxy-demo
+  labels:
+    app: sidecar-header-proxy-demo
+spec:
+  containers:
+    - name: a-authgateway-sidecar
+      image: sidecar-header-proxy:local
+      command: ["uvicorn", "container_a.main:app", "--host", "0.0.0.0", "--port", "8080"]
+      ports:
+        - containerPort: 8080
+      env:
+        - name: EXTERNAL_BASE_URL
+          value: "https://httpbin.org"
+      readinessProbe:
+        httpGet:
+          path: /healthz
+          port: 8080
+
+    - name: b-app
+      image: sidecar-header-proxy:local
+      command: ["uvicorn", "container_b.main:app", "--host", "0.0.0.0", "--port", "8000"]
+      ports:
+        - containerPort: 8000
+      env:
+        - name: PROXY_BASE_URL
+          value: "http://localhost:8080"
+        - name: SERVICE_ID
+          value: "order-service"
+      readinessProbe:
+        httpGet:
+          path: /healthz
+          port: 8000

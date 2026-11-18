@@ -1,0 +1,27 @@
+replicaCount: 1
+
+image:
+  repository: k8s-deployer-api
+  tag: local
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8000
+
+ingress:
+  enabled: false
+  className: nginx
+  host: fastapi.localhost
+
+env:
+  # default container image the API uses when a create-deployment request
+  # doesn't specify one
+  defaultImage: "python:3.12-slim"
+
+serviceAccount:
+  create: true
+  name: ""
+
+resources: {}

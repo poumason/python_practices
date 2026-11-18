@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ name }}
+  namespace: {{ namespace }}
+  labels:
+    app: {{ name }}
+    created-by: k8s-deployer-api
+spec:
+  replicas: {{ replicas }}
+  selector:
+    matchLabels:
+      app: {{ name }}
+  template:
+    metadata:
+      labels:
+        app: {{ name }}
+        created-by: k8s-deployer-api
+    spec:
+      containers:
+        - name: {{ name }}
+          image: {{ image }}
+          # a bare python image has no long-running process by default;
+          # run a trivial http server so the container doesn't exit/crash-loop
+          command: ["python3", "-m", "http.server", "8000"]
+          ports:
+            - containerPort: 8000

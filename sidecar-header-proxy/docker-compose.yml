@@ -1,0 +1,21 @@
+services:
+  a:
+    build: .
+    command: uvicorn container_a.main:app --host 0.0.0.0 --port 8080
+    ports:
+      - "8080:8080"
+
+  b:
+    build: .
+    command: uvicorn container_b.main:app --host 0.0.0.0 --port 8000
+    environment:
+      # Compose runs each service in its own network namespace, so B
+      # reaches A by service name here. In the k8s Pod (see k8s/pod.yaml)
+      # both containers share one network namespace, so there it's
+      # just http://localhost:8080.
+      PROXY_BASE_URL: http://a:8080
+      SERVICE_ID: order-service
+    ports:
+      - "8000:8000"
+    depends_on:
+      - a

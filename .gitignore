@@ -144,3 +144,6 @@ qdrant_storage
 helm_registry/
 
 es_data/
+# Playwright saved login sessions
+.auth/
+.playwright-mcp/
