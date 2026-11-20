@@ -1,0 +1,117 @@
+# Langfuse（web + worker）— chart 2.1.0，所有儲存層全部外接（deploy: false），不使用任何 CRD
+# release 名稱：langfuse
+#
+# 所有主機名稱都用「同 namespace 的短名稱」，不寫死 namespace 或 cluster domain（cluster.local），
+# 所以同一份 values 可以部署到任何 namespace。
+# 所有密碼都從 scripts/create-secrets.sh 建立的 Secret 讀取，這份檔案裡沒有任何密碼。
+langfuse:
+  # ⚠️ 釘在 v3.225.7，不是 chart 預設的 appVersion（4.24.0）。
+  #    v4 的 ClickHouse migration #39 起需要比 Bitnami 能提供的（≤25.7.5）更新的 ClickHouse，
+  #    用 v3 換來的代價：沒有 full-text search / filter search bar / monitors&alerts / Observations API v2。
+  #    v3 是 Langfuse 目前仍並行維護的分支。詳見 README「版本與取捨」。
+  image:
+    tag: "3.225.7"
+    pullPolicy: IfNotPresent
+
+  logging:
+    level: info
+    format: json
+
+  salt:
+    secretKeyRef: { name: langfuse-app-secrets, key: salt }
+  encryptionKey:
+    secretKeyRef: { name: langfuse-app-secrets, key: encryption-key }
+  nextauth:
+    url: "http://localhost:3000"        # install.sh 用 LANGFUSE_URL 覆蓋成對外網址
+    secret:
+      secretKeyRef: { name: langfuse-app-secrets, key: nextauth-secret }
+
+  features:
+    telemetryEnabled: false             # 公司內部部署不對外回報；要開請改 true
+    signUpDisabled: false
+
+  nodeEnv: production
+
+  # Ingress 預設關閉（網域/TLS/ingress class 各公司不同）。要開請見 README「對外存取」
+  ingress:
+    enabled: false
+
+  web:
+    replicas: 1
+    # 512Mi/1Gi 會在「migration 全部成功、Next.js 已啟動」之後 OOM（JavaScript heap out of memory, exit 134）
+    resources:
+      requests: { cpu: 250m, memory: 768Mi }
+      limits: { memory: 2Gi }
+
+  worker:
+    replicas: 1
+    resources:
+      requests: { cpu: 250m, memory: 512Mi }
+      limits: { memory: 1Gi }
+
+postgresql:
+  deploy: false
+  host: postgresql-ha-pgpool
+  port: 5432
+  auth:
+    username: langfuse
+    database: langfuse
+    existingSecret: langfuse-postgresql-auth
+    secretKeys:
+      userPasswordKey: password
+  migration:
+    autoMigrate: true
+
+redis:
+  deploy: false
+  sentinel:
+    enabled: true
+    masterName: mymaster
+    nodes: "langfuse-redis-node-0.langfuse-redis-headless:26379,langfuse-redis-node-1.langfuse-redis-headless:26379,langfuse-redis-node-2.langfuse-redis-headless:26379"
+    existingSecret: langfuse-redis-auth       # 這版 Bitnami redis 的 Sentinel 與 Redis 共用同一組密碼
+    existingSecretPasswordKey: redis-password
+  auth:
+    username: default
+    existingSecret: langfuse-redis-auth
+    existingSecretPasswordKey: redis-password
+    database: 0
+  tls:
+    enabled: false
+
+clickhouse:
+  deploy: false                             # 不用 operator/CRD
+  host: langfuse-clickhouse
+  httpPort: 8123
+  nativePort: 9000
+  database: default
+  cluster:
+    enabled: true                           # ON CLUSTER DDL + ReplicatedMergeTree（cluster 名稱 "default"）
+  auth:
+    username: default
+    existingSecret: langfuse-clickhouse-auth
+    existingSecretKey: admin-password
+  migration:
+    autoMigrate: true
+    ssl: false
+
+s3:
+  deploy: false
+  storageProvider: s3
+  endpoint: "http://langfuse-minio:9000"
+  region: "us-east-1"                       # MinIO 任意非空值即可
+  forcePathStyle: true                      # MinIO 必須
+  bucket: langfuse
+  accessKeyId:
+    secretKeyRef: { name: langfuse-minio-auth, key: root-user }
+  secretAccessKey:
+    secretKeyRef: { name: langfuse-minio-auth, key: root-password }
+  eventUpload:
+    bucket: langfuse-events
+  batchExport:
+    enabled: true
+    bucket: langfuse-exports
+  mediaUpload:
+    enabled: true
+    bucket: langfuse-media
+    maxContentLength: 1000000000
+    downloadUrlExpirySeconds: 3600

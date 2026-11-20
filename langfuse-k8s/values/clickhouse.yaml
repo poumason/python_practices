@@ -1,0 +1,61 @@
+# Bitnami clickhouse chart 9.4.4 — 1 shard × 2 replica（ReplicatedMergeTree）+ 3 節點 Keeper
+# 純 StatefulSet，不需要任何 CRD（公司 k8s 禁用 CRD 就是為了這個）
+# release 名稱必須是 langfuse-clickhouse（host = langfuse-clickhouse，port 8123/9000）
+#
+# ⚠️ 版本天花板（部署前必讀）：Langfuse v4 的 ClickHouse migration #39 起使用
+#    `INDEX ... TYPE text(tokenizer = ...)` 全文檢索語法，需要比 25.7.5 更新的 ClickHouse
+#    （官方建議 26.4）。bitnamilegacy 最高只到 25.7.5，所以 langfuse 必須用 v3.x
+#    （values/langfuse.yaml 釘在 3.225.7）。要上 v4 請改用官方 clickhouse/clickhouse-server:26.4
+#    （Bitnami chart 的啟動腳本是 Bitnami image 專用的，不能直接換 image）或 Altinity Operator（CRD）。
+#
+# 實測確認（Sept）：cluster 名稱為 "default"；ReplicatedMergeTree ON CLUSTER default 建表後
+# 兩個 replica 雙向資料複製正常。
+image:
+  registry: docker.io
+  repository: bitnamilegacy/clickhouse
+  tag: 25.7.5-debian-12-r0
+  digest: "sha256:2261b50861e29ad3a15d427db96ebf23aabb3be5b12b870192862777246cb349"
+  pullPolicy: IfNotPresent
+
+shards: 1
+replicaCount: 2
+
+auth:
+  username: default
+  existingSecret: langfuse-clickhouse-auth  # scripts/create-secrets.sh 建立
+  existingSecretKey: admin-password
+
+persistence:
+  enabled: true
+  size: 100Gi
+  storageClass: ""
+  accessModes: [ReadWriteOnce]
+
+resources:
+  requests: { cpu: 250m, memory: 512Mi }
+  limits: { memory: 1Gi }
+
+# Keeper 在這個 chart 是獨立的 StatefulSet + 獨立 image（不是 clickhouse 本體內建）
+keeper:
+  enabled: true
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/clickhouse-keeper
+    tag: 25.7.5-debian-12-r0
+    digest: "sha256:d56ed003749704c62766b29c96437f72d2f3b9cf9a2e09069ebad99119d091be"
+    pullPolicy: IfNotPresent
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { memory: 512Mi }
+
+service:
+  type: ClusterIP
+  ports:
+    http: 8123
+    tcp: 9000
+
+# soft：節點數不足時 hard 會讓 replica 卡 Pending。≥3 個 node 請改 hard（clickhouse 與 keeper.podAntiAffinityPreset 都要設）
+podAntiAffinityPreset: soft
+
+metrics:
+  enabled: false

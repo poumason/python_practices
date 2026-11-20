@@ -1,0 +1,48 @@
+# Bitnami postgresql-ha chart 16.3.2 — 3 節點 PostgreSQL（repmgr 自動 failover）+ Pgpool-II
+# release 名稱必須是 postgresql-ha（Langfuse 連 postgresql-ha-pgpool:5432）
+#
+# 由 chart 直接建立 Langfuse 專用的 role + database（postgresql.username/database），
+# 不需要手動 CREATE ROLE。pgpool 也會自動認得這個使用者（PGPOOL_POSTGRES_USERNAME = postgresql.username），
+# 不需要 pgpool.customUsers。（Sept 實測的是「預設 postgres 超級使用者 + 手動建 role + customUsersSecret」，
+# 這份改走 chart 原生的自訂使用者流程，見 README「驗證狀態」。）
+postgresql:
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/postgresql-repmgr
+    tag: 17.6.0-debian-12-r2
+    digest: "sha256:f12387ec882ba42383bbeccfe56d1e9b7671bfbb10795426de4acf2ae800f314"
+    pullPolicy: IfNotPresent
+  replicaCount: 3
+  username: langfuse
+  database: langfuse
+  existingSecret: langfuse-postgresql-auth   # keys: postgres-password / password / repmgr-password
+  usePasswordFiles: true
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: ""
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { memory: 1Gi }
+  podAntiAffinityPreset: soft                # ≥3 個 node 請改 hard
+
+pgpool:
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/pgpool
+    tag: 4.6.3-debian-12-r0
+    digest: "sha256:d3bf3910f148d7546df0762d1abed497cdeab01fdb239a337982e240a2d110ab"
+    pullPolicy: IfNotPresent
+  existingSecret: langfuse-pgpool-auth       # keys: admin-password / sr-check-password
+  usePasswordFiles: true
+  # 關掉 load balancing（A/B 實測過）：同一份 DB、同一個 Prisma migration 指令（langfuse:3.225.7 的
+  # prisma migrate deploy，424 個 migration）經 pgpool 跑——
+  #   useLoadBalancing: true  → "Invariant violation: migration persistence is not initialized"（必現）
+  #   useLoadBalancing: false → "All migrations have been successfully applied"
+  # 開著時 SELECT 會被分流到尚未套用 DDL 的 replica。Sept 的繞法是把 DIRECT_URL 寫死指到 primary pod，
+  # repmgr failover 後就失效；現在全部走 primary，failover 由 pgpool 自己跟隨，不需要 DIRECT_URL。
+  # 代價：讀取流量不會分散到 replica（replica 只做備援/failover）。
+  useLoadBalancing: false
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { memory: 384Mi }

@@ -1,0 +1,49 @@
+# Bitnami minio chart 17.0.21 — S3 相容物件儲存（standalone，單 pod）
+# release 名稱必須是 langfuse-minio（endpoint = http://langfuse-minio:9000）
+#
+# standalone 而非 distributed：distributed（erasure coding）要 ≥4 個實體節點才有容錯意義。
+# 要容錯請改接叢集既有的 S3（AWS S3 / 公司 MinIO / Ceph），把 langfuse.yaml 的 s3 段改成外部端點，
+# 並略過這個 release。
+mode: standalone
+
+# docker.io/bitnami/minio 已是 0 個免費 tag，改用 bitnamilegacy 封存 mirror
+image:
+  registry: docker.io
+  repository: bitnamilegacy/minio
+  tag: latest
+  digest: "sha256:451fe6858cb770cc9d0e77ba811ce287420f781c7c1b806a386f6896471a349c"
+  pullPolicy: IfNotPresent
+
+auth:
+  existingSecret: langfuse-minio-auth  # scripts/create-secrets.sh 建立
+  rootUserSecretKey: root-user
+  rootPasswordSecretKey: root-password
+
+# 啟動時自動建好 Langfuse 需要的 3 個 bucket（外部 S3 不會被 langfuse chart 自動建 bucket）
+defaultBuckets: "langfuse-events langfuse-exports langfuse-media"
+
+persistence:
+  enabled: true
+  size: 20Gi
+  storageClass: ""
+
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits: { memory: 512Mi }
+
+service:
+  type: ClusterIP
+  ports:
+    api: 9000
+
+# Web Console 只在叢集內（kubectl port-forward svc/langfuse-minio-console 9090:9090）
+console:
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/minio-object-browser
+    tag: latest
+    digest: "sha256:4a450de20eef96df6d72fd638e737a271895142c4c456610f4d106dec42e0c2c"
+    pullPolicy: IfNotPresent
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 256Mi }
