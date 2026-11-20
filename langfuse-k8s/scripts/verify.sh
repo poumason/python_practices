@@ -2,6 +2,7 @@
 # 部署後驗證（不只看 Pod Running，而是實際打資料路徑）。
 #   NAMESPACE=langfuse ./verify.sh                 # 全部
 #   NAMESPACE=langfuse ./verify.sh redis postgresql-ha
+#   STORAGE_CLASSES="sc-a sc-b sc-c" ./verify.sh storage   # 驗證副本確實分散在不同 StorageClass
 # 只讀為主；clickhouse 會建立並刪除一張 _verify_repl 測試表。
 set -uo pipefail
 NAMESPACE="${NAMESPACE:-langfuse}"
@@ -59,6 +60,23 @@ if selected postgresql-ha; then
   n=$($K get pods -l app.kubernetes.io/name=postgresql-ha,app.kubernetes.io/component=postgresql --no-headers 2>/dev/null | wc -l | tr -d ' ')
   prim=0; for i in $(seq 0 $((n-1))); do r=$($K exec postgresql-ha-postgresql-$i -- env PGPASSWORD="$(secret langfuse-postgresql-auth postgres-password)" psql -U postgres -tAc "select pg_is_in_recovery()" 2>/dev/null); [ "$r" = f ] && prim=$((prim+1)); done
   [ "$prim" = 1 ] && ok "$n 個節點中恰有 1 個 primary" || bad "primary 數量異常: $prim"
+fi
+
+if selected storage; then
+  echo "[storage]  各 StatefulSet 副本的 PVC 與 StorageClass"
+  rows=$($K get pvc -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.storageClassName}{" "}{.status.phase}{"\n"}{end}' 2>/dev/null)
+  read -r -a want_sc <<<"${STORAGE_CLASSES:-}"
+  for prefix in redis-data-langfuse-redis-node data-langfuse-clickhouse-shard0 data-langfuse-clickhouse-keeper data-postgresql-ha-postgresql; do
+    grp=$(echo "$rows" | grep "^$prefix-[0-9]* ") ; [ -z "$grp" ] && continue
+    n=$(echo "$grp" | wc -l | tr -d ' '); distinct=$(echo "$grp" | awk '{print $2}' | sort -u | wc -l | tr -d ' ')
+    unbound=$(echo "$grp" | awk '$3!="Bound"' | wc -l | tr -d ' ')
+    echo "  · $prefix: $(echo "$grp" | awk '{printf "%s=%s ", $1, $2}' | sed "s/$prefix-//g")"
+    [ "$unbound" = 0 ] && ok "$prefix 全部 Bound" || bad "$prefix 有 $unbound 個 PVC 未 Bound"
+    if [ ${#want_sc[@]} -gt 1 ]; then
+      need=$(( n < ${#want_sc[@]} ? n : ${#want_sc[@]} ))
+      [ "$distinct" -ge "$need" ] && ok "$prefix 分散在 $distinct 個 StorageClass" || bad "$prefix 只用了 $distinct 個 StorageClass（預期 $need 個）"
+    fi
+  done
 fi
 
 if selected langfuse; then

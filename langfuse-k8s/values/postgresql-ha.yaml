@@ -17,14 +17,17 @@ postgresql:
   database: langfuse
   existingSecret: langfuse-postgresql-auth   # keys: postgres-password / password / repmgr-password
   usePasswordFiles: true
-  persistence:
-    enabled: true
-    size: 20Gi
-    storageClass: ""
   resources:
     requests: { cpu: 250m, memory: 256Mi }
     limits: { memory: 1Gi }
   podAntiAffinityPreset: soft                # ≥3 個 node 請改 hard
+
+# 注意：這個 chart 的 persistence 在「最上層」，不是 postgresql.persistence
+# （寫在 postgresql 底下不會報錯，但會被默默忽略 → PVC 變成預設的 8Gi）
+persistence:
+  enabled: true
+  size: 20Gi
+  storageClass: ""
 
 pgpool:
   image:

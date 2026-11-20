@@ -10,6 +10,8 @@
 - 所有密碼由 `scripts/create-secrets.sh` 產生並放進 Secret，**values 檔裡沒有任何密碼**
 - 所有主機名稱用同 namespace 的短名稱，**同一份 values 可以裝進任何 namespace**，也不依賴 `cluster.local`
 
+> 元件關係、資料流、StorageClass 分散與 Secret 對應的架構圖：[docs/architecture.md](docs/architecture.md)
+
 ## 元件
 
 | 元件 | Helm release（名稱不可改） | Chart | 角色 |
@@ -37,9 +39,12 @@ langfuse-k8s/
 │   ├── redis.yaml  minio.yaml  clickhouse.yaml  postgresql-ha.yaml  langfuse.yaml
 ├── scripts/
 │   ├── create-secrets.sh      # 產生所有 Secret（冪等）
+│   ├── create-pvcs.sh         # （選用）預先建立每個副本不同 StorageClass 的 PVC
 │   ├── install.sh             # 依序部署（冪等，可重跑；可只裝指定元件）
-│   ├── verify.sh              # 部署後驗證（實際打資料路徑）
+│   ├── verify.sh              # 部署後驗證（實際打資料路徑；含 StorageClass 分散檢查）
 │   └── uninstall.sh           # 移除（預設保留 PVC 與 Secret）
+├── docs/
+│   └── architecture.md        # 架構圖（Mermaid）：元件關係 / StorageClass 分散 / 部署順序與 Secret
 └── overrides/                 # （自己建立，不進版控）公司環境專屬的調整，install.sh 會自動疊加
 ```
 
@@ -116,7 +121,9 @@ Postgres migration 多 1 個（424 → 425）。**但 3.227.1 沒有實際部署
 | 整套（5 個 release）端到端部署，web/worker 起來、`/api/public/health` 回 `{"status":"OK","version":"3.225.7"}`、Postgres 424 + ClickHouse 37 個 migration 全過 | 2026-09 實測（kind，用 Sept 的 values：預設 postgres 使用者 + 手動建 role，Prisma 走 DIRECT_URL 指到 primary pod） |
 | ClickHouse 1×2 + Keeper：cluster 名稱 `default`、`ReplicatedMergeTree ON CLUSTER default` 雙向複製 | 2026-09 實測 |
 | **Redis**（`bitnamilegacy` 8.2.1 + existingSecret）：1 master + 2 replica、`noeviction`、Sentinel quorum、短名稱 DNS | **2026-11 實測**（`verify.sh redis` 通過） |
-| **PostgreSQL HA**：chart 直接建立 `langfuse` 使用者與資料庫、existingSecret、經 pgpool 以 langfuse 登入且連到 primary、2 節點中恰 1 個 primary | **2026-11 實測**（測試中 `verify.sh` 的判斷式有一處寫錯，已修正；修正後該區段沒有在叢集上重跑，實際連線結果當時是手動確認的） |
+| **PostgreSQL HA**：chart 直接建立 `langfuse` 使用者與資料庫、existingSecret、經 pgpool 以 langfuse 登入且連到 primary、恰 1 個 primary | **2026-11 實測**（`verify.sh postgresql-ha` 通過，2 節點與 3 節點各跑過） |
+| **StorageClass 分散**（`STORAGE_CLASSES`）：Redis 與 PostgreSQL HA 各自的 3 個副本落在 3 個不同 StorageClass、StatefulSet 沿用預建 PVC 不另外多建、`verify.sh storage` 通過；PVC 被刪除重建後落到第一個 class 且 `verify.sh storage` 會報錯 | **2026-11 實測**，但用的是 kind 上 3 個臨時建立的 StorageClass（同一個 local-path provisioner，測完已刪除）——驗證的是「StatefulSet 與 PVC 的行為」，**沒有**在真正不同儲存後端上測過 |
+| ClickHouse / Keeper 的預建 PVC 名稱（`data-langfuse-clickhouse-shard0-N`、`data-langfuse-clickhouse-keeper-N`） | 從 `helm template` 的 StatefulSet 推導，與 Redis / PostgreSQL 驗證過的是同一個機制；**ClickHouse 沒有實際用 `STORAGE_CLASSES` 部署過** |
 | **Prisma migration 直接經 pgpool**（`useLoadBalancing: false`，不需要 DIRECT_URL） | **2026-11 實測 A/B**：load balancing 開 → `migration persistence is not initialized`（必現）；關 → `All migrations have been successfully applied` |
 | **MinIO**（existingSecret、三個 bucket 自動建立） | **2026-11 實測**（`verify.sh minio` 通過） |
 | 短名稱 DNS（`postgresql-ha-pgpool`、`langfuse-minio`、pod 層級 headless 名稱）從 langfuse image 內解析 | **2026-11 實測** |
@@ -124,6 +131,38 @@ Postgres migration 多 1 個（424 → 425）。**但 3.227.1 沒有實際部署
 
 2026-11 的實測是在資源吃緊的單節點 kind 上，用極小的 requests 分別驗證有改動的部分，測完已清掉；
 **整套用本目錄的腳本從零部署一次**（`install.sh && verify.sh`）還沒做過，建議第一次部署時就跑這兩個，`verify.sh` 會逐項告訴你哪裡不對。
+
+## StorageClass 分散（公司有 3 個 StorageClass 時）
+
+**可以，PostgreSQL、Redis、ClickHouse（含 Keeper）都可以把各個副本放在不同的 StorageClass。**
+但不能只靠 values：這些 chart 的 StatefulSet 只有一個 `volumeClaimTemplate`，`persistence.storageClass` 只能填一個，
+所有副本會用同一個 class；`persistence.existingClaim` 則會讓所有副本共用同一個 PVC（RWO 下行不通）。
+
+做法：StatefulSet 遇到「同名 PVC 已存在」就直接使用，所以在 `helm install` 之前，先照命名規則把每個副本的 PVC 建好、各自指定不同的 `storageClassName`。
+`scripts/create-pvcs.sh` 做這件事，`install.sh` 在設定 `STORAGE_CLASSES` 時會自動呼叫：
+
+```bash
+STORAGE_CLASSES="sc-a sc-b sc-c" NAMESPACE=langfuse ./scripts/install.sh
+STORAGE_CLASSES="sc-a sc-b sc-c" NAMESPACE=langfuse ./scripts/verify.sh storage   # 驗證分散結果
+```
+
+第 i 個副本使用第 (i mod N) 個 class：
+
+| 元件 | 副本數 | 落點（以 sc-a / sc-b / sc-c 為例） | PVC 名稱 |
+|---|---|---|---|
+| PostgreSQL | 3 | 0→a、1→b、2→c | `data-postgresql-ha-postgresql-N` |
+| Redis Sentinel | 3 | 0→a、1→b、2→c | `redis-data-langfuse-redis-node-N` |
+| ClickHouse | 2 | 0→a、1→b（c 沒有 ClickHouse 資料） | `data-langfuse-clickhouse-shard0-N` |
+| ClickHouse Keeper | 3 | 0→a、1→b、2→c | `data-langfuse-clickhouse-keeper-N` |
+| MinIO | 1 | 只能一個 class：`MINIO_STORAGE_CLASS`，預設 sc-a | `langfuse-minio`（chart 自己建） |
+
+注意事項：
+
+- **容量與副本數**：用這個模式時，容量由環境變數決定（`REDIS_PVC_SIZE` / `CLICKHOUSE_PVC_SIZE` / `KEEPER_PVC_SIZE` / `POSTGRESQL_PVC_SIZE` / `MINIO_PVC_SIZE`，預設 8Gi / 100Gi / 8Gi / 20Gi / 20Gi），**values 檔裡的 `persistence.size` 不再生效**；副本數若改過要同步設 `REDIS_REPLICAS` / `CLICKHOUSE_REPLICAS` / `KEEPER_REPLICAS` / `POSTGRESQL_REPLICAS`，否則 PVC 會多建或少建
+- **PVC 的 class 建立後無法修改**。如果某個副本的 PVC 被刪掉，StatefulSet 會依 template 重建，**落在 `STORAGE_CLASSES` 的第一個 class**（實測確認），分散就被破壞了；`verify.sh storage` 會報錯提醒。把副本搬回正確的 class 是維運操作（停該副本、重建 PVC、從其他副本重新同步），沒有一行指令的做法，所以請避免手動刪 PVC
+- 只能在**全新安裝**時使用：已經部署好的 release 的 `volumeClaimTemplate` 不可變，要改請先備份資料、`uninstall.sh --purge` 後重裝
+- 分開 StorageClass 只保證資料不在同一個儲存後端；pod 是否分散在不同 node 仍靠 anti-affinity（≥3 個 node 請設 `hard`）。若 StorageClass 是綁 zone 的，pod 會跟著 PVC 的 zone 走（細節見架構圖文件第 2 節）
+- 掛掉一個 class 時各元件的行為（PostgreSQL / Redis 自動 failover、ClickHouse 剩 1 個 replica、Keeper 剩 2/3 仍有 quorum、**MinIO 只有一個 class 是單點**）見 [docs/architecture.md](docs/architecture.md) 第 2 節
 
 ## 正式環境調整
 
@@ -197,6 +236,7 @@ NAMESPACE=langfuse ./scripts/uninstall.sh --purge  # 連 PVC 與 Secret 一起�
 
 - **Pgpool load balancing 已關閉**（見上方 A/B 實測）：所有查詢走 primary，replica 只做備援/failover，讀取不會分散；換來 Prisma migration 能直接經 pgpool 且不用寫死 primary pod
 - **MinIO 是 standalone 單點**；distributed 模式要 ≥4 個實體節點才有容錯意義
+- **media 上傳 / 批次匯出下載要用 presigned URL，由使用者的瀏覽器 / SDK 直接連 S3**（依 Langfuse 的設計；本專案沒有實測）。`values/langfuse.yaml` 的 S3 endpoint 是叢集內部位址 `http://langfuse-minio:9000`，事件寫入沒問題，但這兩個功能對叢集外的使用者可能不通。要用的話：替 MinIO 開一個對外的 Ingress / 網址，並覆寫 `s3.mediaUpload.endpoint` 與 `s3.batchExport.endpoint`；或直接改接公司既有的 S3。部署後請各試一次
 - **Redis Sentinel 與 Redis 共用同一組密碼**（這版 Bitnami chart 沒有獨立的 Sentinel 密碼）
 - **Bitnami legacy image 不再更新**，沒有安全修補；ClickHouse 停在 25.7.5
 - **Langfuse 用 root 帳密連 MinIO**（standalone 沒有另外開專用 IAM user）
