@@ -1,0 +1,21 @@
+{{- if .Values.pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "ch.name" . }}
+  labels: {{- include "ch.labels" . | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels: {{- include "ch.selector" (dict "Release" .Release "component" "clickhouse") | nindent 6 }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "ch.keeper" . }}
+  labels: {{- include "ch.labels" . | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels: {{- include "ch.selector" (dict "Release" .Release "component" "keeper") | nindent 6 }}
+{{- end }}

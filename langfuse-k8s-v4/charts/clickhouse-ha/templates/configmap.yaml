@@ -1,0 +1,83 @@
+{{- if not .Values.auth.existingSecret }}{{ fail "auth.existingSecret 必填（含 ClickHouse 密碼的 Secret，key 見 auth.existingSecretKey）" }}{{ end }}
+{{- if not (mod (int .Values.keeper.replicaCount) 2) }}{{ fail "keeper.replicaCount 必須是奇數（Raft quorum）" }}{{ end }}
+{{- $n := include "ch.name" . }}{{ $k := include "ch.keeper" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $n }}-config
+  labels: {{- include "ch.labels" . | nindent 4 }}
+data:
+  10-langfuse.xml: |
+    <clickhouse>
+      <!-- 每個 replica 的 macro：replica = Pod 名稱（from_env 在啟動時由環境變數帶入）-->
+      <macros>
+        <shard>01</shard>
+        <replica from_env="CLICKHOUSE_REPLICA"/>
+      </macros>
+      <!-- Langfuse 的 ReplicatedMergeTree migration 沒有帶參數，要靠這兩個預設值 -->
+      <default_replica_path>/clickhouse/tables/{database}/{table}</default_replica_path>
+      <default_replica_name>{replica}</default_replica_name>
+      <interserver_http_host from_env="CLICKHOUSE_INTERSERVER_HOST"/>
+      <remote_servers>
+        <{{ .Values.clusterName }} replace="1">
+          <shard>
+            <internal_replication>true</internal_replication>
+    {{- range $i := until (int .Values.replicaCount) }}
+            <replica>
+              <host>{{ $n }}-{{ $i }}.{{ $n }}-headless</host>
+              <port>9000</port>
+              <user from_env="CLICKHOUSE_USER"/>
+              <password from_env="CLICKHOUSE_PASSWORD"/>
+            </replica>
+    {{- end }}
+          </shard>
+        </{{ .Values.clusterName }}>
+      </remote_servers>
+      <zookeeper>
+    {{- range $i := until (int .Values.keeper.replicaCount) }}
+        <node>
+          <host>{{ $k }}-{{ $i }}.{{ $k }}-headless</host>
+          <port>9181</port>
+        </node>
+    {{- end }}
+      </zookeeper>
+    </clickhouse>
+{{- if .Values.extraConfig }}
+  90-extra.xml: |
+{{ .Values.extraConfig | indent 4 }}
+{{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $k }}-config
+  labels: {{- include "ch.labels" . | nindent 4 }}
+data:
+  keeper_config.xml: |
+    <clickhouse>
+      <logger>
+        <level>information</level>
+        <console>true</console>
+      </logger>
+      <listen_host>0.0.0.0</listen_host>
+      <keeper_server>
+        <tcp_port>9181</tcp_port>
+        <server_id from_env="KEEPER_ID"/>
+        <log_storage_path>/var/lib/clickhouse/coordination/log</log_storage_path>
+        <snapshot_storage_path>/var/lib/clickhouse/coordination/snapshots</snapshot_storage_path>
+        <coordination_settings>
+          <operation_timeout_ms>10000</operation_timeout_ms>
+          <session_timeout_ms>30000</session_timeout_ms>
+          <raft_logs_level>warning</raft_logs_level>
+        </coordination_settings>
+        <raft_configuration>
+    {{- range $i := until (int .Values.keeper.replicaCount) }}
+          <server>
+            <id>{{ add $i 1 }}</id>
+            <hostname>{{ $k }}-{{ $i }}.{{ $k }}-headless</hostname>
+            <port>9234</port>
+          </server>
+    {{- end }}
+        </raft_configuration>
+      </keeper_server>
+    </clickhouse>

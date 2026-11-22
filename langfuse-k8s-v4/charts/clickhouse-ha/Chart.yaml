@@ -1,0 +1,8 @@
+apiVersion: v2
+name: clickhouse-ha
+description: >-
+  ClickHouse（1 shard × N replica）+ ClickHouse Keeper（3 節點）。用官方 clickhouse/clickhouse-server 與
+  clickhouse/clickhouse-keeper image，純 StatefulSet，不需要任何 CRD / operator。專為 Langfuse v4 準備。
+type: application
+version: 0.1.0
+appVersion: "26.8.36.3"

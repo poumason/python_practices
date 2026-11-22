@@ -1,0 +1,48 @@
+# ClickHouse（自建 chart：charts/clickhouse-ha，官方 image，純 StatefulSet，無 CRD）
+# release 名稱必須是 langfuse-clickhouse（host = langfuse-clickhouse，port 8123/9000）
+#
+# 為什麼不用 Bitnami chart：Langfuse v4 需要 ClickHouse >= 25.12（全文檢索 / JSON 型別 / lightweight updates），
+# Bitnami（付費或免費 legacy）最高只到 25.7.5，而且 Bitnami chart 的啟動腳本是 Bitnami image 專用的。
+# 這裡改用官方 clickhouse/clickhouse-server 與 clickhouse/clickhouse-keeper，版本與 Langfuse chart 2.2.5
+# 內建方案使用的一致（26.8.36.3）。
+#
+# 官方文件的限制：Langfuse 對「自己用 StatefulSet 部署的 ClickHouse」不提供官方支援
+# （官方支援：ClickHouse Cloud/BYOC、ClickHouse Kubernetes Operator；內建 chart 是社群支援）。
+image:
+  repository: clickhouse/clickhouse-server
+  tag: "26.8.36.3"
+  digest: "sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7"
+
+replicaCount: 2
+clusterName: default
+
+auth:
+  username: default
+  existingSecret: langfuse-clickhouse-auth   # scripts/create-secrets.sh 建立
+  existingSecretKey: admin-password
+  accessManagement: true
+
+persistence:
+  size: 100Gi
+  storageClass: ""
+
+# 測試用規格；官方最低需求是 2 CPU / 8GiB（正式環境請在 overrides/clickhouse.yaml 調大）
+resources:
+  requests: { cpu: "1", memory: 2Gi }
+  limits: { memory: 8Gi }
+
+keeper:
+  replicaCount: 3
+  image:
+    repository: clickhouse/clickhouse-keeper
+    tag: "26.8.36.3"
+    digest: "sha256:a847f2f30ac6950828d6f2413828adeeee4c9d261cb88f88eb6f1606a5f5a062"
+  persistence:
+    size: 8Gi
+    storageClass: ""
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { memory: 1Gi }
+
+# soft：節點不足時 hard 會讓副本卡 Pending。>=3 個 node 請改 hard
+podAntiAffinityPreset: soft

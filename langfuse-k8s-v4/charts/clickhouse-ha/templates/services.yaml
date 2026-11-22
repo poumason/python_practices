@@ -1,0 +1,39 @@
+{{- $n := include "ch.name" . }}{{ $k := include "ch.keeper" . }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $n }}
+  labels: {{- include "ch.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector: {{- include "ch.selector" (dict "Release" .Release "component" "clickhouse") | nindent 4 }}
+  ports:
+    - { name: http, port: {{ .Values.service.ports.http }}, targetPort: http }
+    - { name: tcp, port: {{ .Values.service.ports.tcp }}, targetPort: tcp }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $n }}-headless
+  labels: {{- include "ch.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector: {{- include "ch.selector" (dict "Release" .Release "component" "clickhouse") | nindent 4 }}
+  ports:
+    - { name: http, port: 8123, targetPort: http }
+    - { name: tcp, port: 9000, targetPort: tcp }
+    - { name: interserver, port: 9009, targetPort: interserver }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $k }}-headless
+  labels: {{- include "ch.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector: {{- include "ch.selector" (dict "Release" .Release "component" "keeper") | nindent 4 }}
+  ports:
+    - { name: client, port: 9181, targetPort: client }
+    - { name: raft, port: 9234, targetPort: raft }

@@ -1,0 +1,84 @@
+{{- $k := include "ch.keeper" . }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $k }}
+  labels: {{- include "ch.labels" . | nindent 4 }}
+    app.kubernetes.io/component: keeper
+spec:
+  replicas: {{ .Values.keeper.replicaCount }}
+  serviceName: {{ $k }}-headless
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels: {{- include "ch.selector" (dict "Release" .Release "component" "keeper") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "ch.labels" . | nindent 8 }}
+        app.kubernetes.io/component: keeper
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      affinity: {{- include "ch.affinity" (dict "Values" .Values "Release" .Release "component" "keeper") | nindent 8 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: keeper
+          image: {{ include "ch.image" (dict "image" .Values.keeper.image) | quote }}
+          imagePullPolicy: {{ .Values.keeper.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          # server_id = Pod 序號 + 1（Raft 要求每個節點唯一）
+          command:
+            - /bin/sh
+            - -c
+            - 'KEEPER_ID=$(( ${POD_NAME##*-} + 1 )); export KEEPER_ID; exec clickhouse-keeper --config-file=/etc/clickhouse-keeper/keeper_config.xml'
+          ports:
+            - { name: client, containerPort: 9181 }
+            - { name: raft, containerPort: 9234 }
+          env:
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+          readinessProbe:
+            tcpSocket: { port: client }
+            periodSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            tcpSocket: { port: client }
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 6
+          resources: {{- toYaml .Values.keeper.resources | nindent 12 }}
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/clickhouse }
+            - { name: config, mountPath: /etc/clickhouse-keeper/keeper_config.xml, subPath: keeper_config.xml }
+      volumes:
+        - name: config
+          configMap: { name: {{ $k }}-config }
+        {{- if not .Values.keeper.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+  {{- if .Values.keeper.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: {{ toYaml .Values.keeper.persistence.accessModes | nindent 10 }}
+        {{- with .Values.keeper.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.keeper.persistence.size | quote }}
+  {{- end }}

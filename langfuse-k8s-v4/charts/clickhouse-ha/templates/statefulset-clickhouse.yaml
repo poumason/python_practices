@@ -1,0 +1,101 @@
+{{- $n := include "ch.name" . }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $n }}
+  labels: {{- include "ch.labels" . | nindent 4 }}
+    app.kubernetes.io/component: clickhouse
+spec:
+  replicas: {{ .Values.replicaCount }}
+  serviceName: {{ $n }}-headless
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels: {{- include "ch.selector" (dict "Release" .Release "component" "clickhouse") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "ch.labels" . | nindent 8 }}
+        app.kubernetes.io/component: clickhouse
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      affinity: {{- include "ch.affinity" (dict "Values" .Values "Release" .Release "component" "clickhouse") | nindent 8 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: clickhouse
+          image: {{ include "ch.image" (dict "image" (dict "repository" .Values.image.repository "tag" .Values.image.tag "digest" .Values.image.digest)) | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - { name: http, containerPort: 8123 }
+            - { name: tcp, containerPort: 9000 }
+            - { name: interserver, containerPort: 9009 }
+          env:
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: CLICKHOUSE_REPLICA
+              value: "$(POD_NAME)"
+            - name: CLICKHOUSE_INTERSERVER_HOST
+              value: "$(POD_NAME).{{ $n }}-headless"
+            - name: CLICKHOUSE_USER
+              value: {{ .Values.auth.username | quote }}
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.auth.existingSecret }}, key: {{ .Values.auth.existingSecretKey }} }
+            - name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT
+              value: {{ ternary "1" "0" .Values.auth.accessManagement | quote }}
+          readinessProbe:
+            httpGet: { path: /ping, port: http }
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 6
+          livenessProbe:
+            httpGet: { path: /ping, port: http }
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          startupProbe:
+            httpGet: { path: /ping, port: http }
+            periodSeconds: 5
+            failureThreshold: 60
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/clickhouse }
+            - { name: config, mountPath: /etc/clickhouse-server/config.d/10-langfuse.xml, subPath: 10-langfuse.xml }
+            {{- if .Values.extraConfig }}
+            - { name: config, mountPath: /etc/clickhouse-server/config.d/90-extra.xml, subPath: 90-extra.xml }
+            {{- end }}
+      volumes:
+        - name: config
+          configMap: { name: {{ $n }}-config }
+        {{- if not .Values.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+  {{- if .Values.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: {{ toYaml .Values.persistence.accessModes | nindent 10 }}
+        {{- with .Values.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size | quote }}
+  {{- end }}

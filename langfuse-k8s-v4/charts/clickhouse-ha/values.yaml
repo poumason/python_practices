@@ -1,0 +1,73 @@
+# ClickHouse（官方 image）— 給 Langfuse v4 用（需要 ClickHouse >= 25.12，UTC 時區）
+# 本 chart 的 release 名稱建議固定為 langfuse-clickhouse（values/langfuse.yaml 的 clickhouse.host 依賴它）。
+
+image:
+  repository: clickhouse/clickhouse-server
+  tag: "26.8.36.3"          # 與 Langfuse chart 2.2.5 內建方案使用的版本一致
+  digest: ""                # 例如 sha256:...；設了就覆蓋 tag
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+replicaCount: 2             # 1 shard × N replica。1 = 完全沒有冗餘
+clusterName: default        # Langfuse 的 ON CLUSTER DDL 預設使用 "default"，不要改
+
+auth:
+  username: default         # Langfuse 以 default 使用者連線（它沒有 per-database grant 的問題）
+  existingSecret: ""        # 必填：含密碼的 Secret 名稱
+  existingSecretKey: admin-password
+  accessManagement: true    # default 使用者可執行 GRANT（要建專用使用者時需要）
+
+persistence:
+  enabled: true
+  size: 100Gi
+  storageClass: ""
+  accessModes: [ReadWriteOnce]
+
+resources:
+  requests: { cpu: "1", memory: 2Gi }
+  limits: { memory: 8Gi }   # 官方最低需求 2 CPU / 8GiB
+
+# 附加的 ClickHouse server 設定（放進 config.d/90-extra.xml，必須含最外層 <clickhouse>…</clickhouse>）
+extraConfig: ""
+
+keeper:
+  replicaCount: 3           # 必須是奇數
+  image:
+    repository: clickhouse/clickhouse-keeper
+    tag: "26.8.36.3"
+    digest: ""
+    pullPolicy: IfNotPresent
+  persistence:
+    enabled: true
+    size: 8Gi
+    storageClass: ""
+    accessModes: [ReadWriteOnce]
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { memory: 1Gi }
+
+service:
+  type: ClusterIP
+  ports:
+    http: 8123
+    tcp: 9000
+
+# soft：節點不足時 hard 會讓副本卡 Pending。>=3 個 node 請用 hard
+podAntiAffinityPreset: soft
+nodeSelector: {}
+tolerations: []
+priorityClassName: ""
+podAnnotations: {}
+
+# 官方 image 的 clickhouse 使用者是 uid/gid 101
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 101
+  runAsGroup: 101
+  fsGroup: 101
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities: { drop: [ALL] }
+
+pdb:
+  enabled: true

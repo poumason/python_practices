@@ -1,0 +1,58 @@
+# Bitnami redis chart 28.0.15 — Redis + Sentinel（3 節點，Sentinel 動態選 master）
+# 部署：scripts/install.sh 會處理，手動等同於
+#   helm upgrade --install langfuse-redis charts/redis-28.0.15.tgz -n <ns> -f values/redis.yaml
+#
+# release 名稱必須是 langfuse-redis：Pod/Service 名稱由它決定
+#   langfuse-redis-node-{0,1,2}.langfuse-redis-headless（langfuse.yaml 的 sentinel.nodes 用到）
+#
+# Image：docker.io/bitnami/* 的免費版已全面下架（只剩不穩定的 latest），改用 Bitnami
+# 保留的免費封存 mirror bitnamilegacy/*，tag + digest 雙重釘住。
+architecture: replication
+
+image:
+  registry: docker.io
+  repository: bitnamilegacy/redis
+  tag: 8.2.1-debian-12-r0
+  digest: "sha256:25bf63f3caf75af4628c0dfcf39859ad1ac8abe135be85e99699f9637b16dc28"
+  pullPolicy: IfNotPresent
+
+auth:
+  enabled: true
+  sentinel: true                       # Sentinel 也要密碼（這版 chart 沒有獨立的 sentinel 密碼，同一組）
+  existingSecret: langfuse-redis-auth  # scripts/create-secrets.sh 建立
+  existingSecretPasswordKey: redis-password
+
+sentinel:
+  enabled: true
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/redis-sentinel
+    tag: 8.2.1-debian-12-r0
+    digest: "sha256:0ca3ea1d2f823c2d9265e0d9e682dc435f219f8d3385aed75b5bb0f365f516a9"
+    pullPolicy: IfNotPresent
+  masterSet: mymaster                  # 對應 langfuse.yaml 的 redis.sentinel.masterName
+  quorum: 2
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 128Mi }
+
+# sentinel.enabled=true 時整個 StatefulSet 只吃 replica.*（master.* 會被忽略）
+replica:
+  replicaCount: 3
+  # Langfuse 硬性要求 noeviction：job queue 的 key 被 eviction 掉，worker 的 job 就直接消失
+  configuration: |-
+    maxmemory-policy noeviction
+  persistence:
+    enabled: true
+    size: 8Gi
+    storageClass: ""                   # 空 = 叢集預設 StorageClass
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }
+  # soft：節點數不足 3 個時 hard 會讓 pod 永遠 Pending。≥3 個 node 的叢集請改 hard
+  podAntiAffinityPreset: soft
+
+metrics:
+  enabled: false
+networkPolicy:
+  enabled: false
