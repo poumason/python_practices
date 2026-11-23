@@ -31,6 +31,12 @@ services:
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
       - TEMPORAL_CORS_ORIGINS=http://localhost:8080
+      - TEMPORAL_AUTH_ENABLED=true
+      - TEMPORAL_AUTH_PROVIDER_URL=https://gitlab.com
+      - TEMPORAL_AUTH_CLIENT_ID=
+      - TEMPORAL_AUTH_CLIENT_SECRET=
+      - TEMPORAL_AUTH_CALLBACK_URL=http://localhost:8089/auth/sso/callback
+      - TEMPORAL_AUTH_SCOPES=openid,profile,email
     ports:
       - "8089:8080"
 
