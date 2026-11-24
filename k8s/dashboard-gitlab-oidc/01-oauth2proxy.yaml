@@ -1,23 +1,11 @@
 ---
-# Allowlist of emails permitted to LOG IN at all. oauth2-proxy is now purely
-# a gate — anyone on this list who logs in gets forwarded to the Dashboard as
-# the SAME static cluster-admin identity (see 05-static-auth-injector.yaml).
-# There's no per-user admin/viewer split anymore; add/remove emails here to
-# control who can reach the Dashboard at all.
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: oauth2-proxy-emails
-  namespace: kubernetes-dashboard
-data:
-  authenticated-emails.txt: |
-    poumason@live.com
-
----
-# GitLab OAuth Application credentials + cookie secret.
-# Create the app at: https://gitlab.com/-/profile/applications
+# Keycloak OAuth client credentials + cookie secret.
+# Register a confidential client in the company's Keycloak realm:
 #   Redirect URI: https://kubedashboard.localhost/oauth2/callback
-#   Scopes: openid, profile, email
+#   Scopes: openid, profile, email (the custom "dept_id" claim must already
+#   be mapped onto the ID token by a protocol mapper on this client/realm —
+#   dashboard-auth-injector reads it straight from the ID token, see
+#   05-static-auth-injector.yaml)
 # Generate the cookie secret with:
 #   python3 -c "import secrets,base64; print(base64.b64encode(secrets.token_bytes(16)).decode())"
 apiVersion: v1
@@ -27,10 +15,9 @@ metadata:
   namespace: kubernetes-dashboard
 type: Opaque
 stringData:
-  client-id: "REPLACE_WITH_GITLAB_APPLICATION_ID"
-  client-secret: "REPLACE_WITH_GITLAB_APPLICATION_SECRET"
+  client-id: "REPLACE_WITH_KEYCLOAK_CLIENT_ID"
+  client-secret: "REPLACE_WITH_KEYCLOAK_CLIENT_SECRET"
   cookie-secret: "REPLACE_WITH_BASE64_16BYTES_SECRET"
-
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -55,25 +42,31 @@ spec:
         - --reverse-proxy=true
         - --upstream=file:///dev/null
         - --http-address=0.0.0.0:4180
-        - --oidc-issuer-url=https://gitlab.com
+        # Company's Keycloak realm issuer, e.g.
+        # https://keycloak.company.internal/realms/<realm-name>
+        - --oidc-issuer-url=REPLACE_WITH_KEYCLOAK_REALM_ISSUER_URL
         - --cookie-secure=true
         - --cookie-expire=30m
-        # No longer critical for downstream token freshness (we forward a
-        # static token now, not oauth2-proxy's own session token — see
-        # 05-static-auth-injector.yaml) — this just keeps oauth2-proxy's own
-        # login session refreshed against GitLab within cookie-expire.
         - --cookie-refresh=2m
         - --whitelist-domain=kubedashboard.localhost
         - --redirect-url=https://kubedashboard.localhost/oauth2/callback
         - --scope=openid profile email
-        - --authenticated-emails-file=/etc/oauth2-proxy/authenticated-emails.txt
-        # GitLab's ID token has no "groups" claim, so oauth2-proxy falls back
-        # to calling GitLab's profile/userinfo endpoint to look for one on
-        # every login — which 401s ("could not get claim \"groups\": ...
-        # unexpected status 401"), blocking the OAuth callback entirely. We
-        # don't use OIDC groups for RBAC (see 03-rbac.yaml, email + built-in
-        # system:authenticated group), so just skip that lookup.
+        # oauth2-proxy is now purely a login gate — anyone with a company
+        # email can get in at all; dashboard-auth-injector (05-*.yaml) is
+        # what actually decides the permission tier per-request, based on
+        # the email/dept_id claims in the real ID token. Replace with the
+        # real company domain.
+        - --email-domain=REPLACE_WITH_COMPANY_DOMAIN
+        # Skips an extra call to Keycloak's userinfo endpoint for claims
+        # missing from the ID token (we don't need "groups", and "dept_id"
+        # is expected to already be on the ID token via a protocol mapper —
+        # one less moving part / dependency on that endpoint being reachable).
         - --skip-claims-from-profile-url=true
+        # Puts the real ID token on the /oauth2/auth response's Authorization
+        # header. dashboard-auth-injector reads this to decode the email/
+        # dept_id claims and pick which static token to forward — see
+        # 05-static-auth-injector.yaml for the full flow.
+        - --set-authorization-header=true
         # Store session data (ID/refresh tokens) in Redis (see 01-redis.yaml)
         # instead of a browser cookie — keeps the cookie small and avoids
         # oauth2-proxy's cookie chunking.
@@ -100,13 +93,6 @@ spec:
             secretKeyRef:
               name: redis-secret
               key: password
-        volumeMounts:
-        - name: emails
-          mountPath: /etc/oauth2-proxy
-      volumes:
-      - name: emails
-        configMap:
-          name: oauth2-proxy-emails
 
 ---
 apiVersion: v1

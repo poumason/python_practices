@@ -1,22 +1,31 @@
 ---
-# Decision (2026-09): stop forwarding each user's own GitLab ID token to
-# kube-apiserver — it kept expiring mid-session (see README's "Logged-in
-# session randomly 401s" entry) even after tightening --cookie-refresh.
-# Instead, every email that passes oauth2-proxy's allowlist now reaches the
-# Dashboard/API server as the SAME static, non-expiring identity below.
-# oauth2-proxy's job shrinks to just "is this email allowed in at all" — it
-# no longer needs to hand out its own session token to anything downstream.
+# Decision (2026-09): stop forwarding each user's own OIDC token to
+# kube-apiserver — it kept expiring mid-session even after tightening
+# --cookie-refresh. Every allowed user instead reaches the Dashboard/API
+# server as one of three FIXED, non-expiring static identities below, chosen
+# by this request's claims. oauth2-proxy's job is just "is this person
+# allowed to log in at all" (now: anyone on the company email domain); the
+# actual permission tier is decided here, by dashboard-auth-injector.
 #
-# This means per-user admin/viewer differentiation (03-rbac.yaml,
-# 04-viewer-nodes-rbac.yaml) no longer applies to anyone going through this
-# path — those bindings are left in place, unused, in case this gets
-# reverted later.
+# Update (2026-11): extended from a single static-admin identity to three
+# tiers, keyed off claims in the real OIDC ID token (email, and a custom
+# "dept_id" claim from Keycloak):
+#   - specific named emails            -> cluster-admin
+#   - specific department IDs          -> operate pods + read workload/network resources
+#   - everyone else on the email domain -> view + delete pods only
+#
+# This means 03-rbac.yaml / 04-viewer-nodes-rbac.yaml (the earlier per-user
+# GitLab-OIDC-token design) no longer apply to anyone going through here —
+# left in place, unused, in case of a revert.
+
+# ---------------------------------------------------------------------------
+# Tier 1: cluster-admin (named individuals)
+# ---------------------------------------------------------------------------
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: dashboard-static-admin
   namespace: kubernetes-dashboard
-
 ---
 apiVersion: v1
 kind: Secret
@@ -26,7 +35,6 @@ metadata:
   annotations:
     kubernetes.io/service-account.name: dashboard-static-admin
 type: kubernetes.io/service-account-token
-
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -41,48 +49,217 @@ subjects:
   name: dashboard-static-admin
   namespace: kubernetes-dashboard
 
+# ---------------------------------------------------------------------------
+# Tier 2: pod-operator (specific department IDs, e.g. 0021003 / 0021004) —
+# full CRUD + logs on pods, read-only on the related workload/network/storage
+# resources needed to actually operate pods day-to-day. No pods/exec.
+# ---------------------------------------------------------------------------
 ---
-# Sits between nginx's auth-url check and oauth2-proxy. Not an Ingress
-# resource, so ingress-nginx's "no configuration-snippet" admission policy
-# doesn't apply to it at all — this is just an ordinary Deployment running
-# its own nginx.conf that we fully own.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dashboard-pod-operator
+  namespace: kubernetes-dashboard
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dashboard-pod-operator-token
+  namespace: kubernetes-dashboard
+  annotations:
+    kubernetes.io/service-account.name: dashboard-pod-operator
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dashboard-pod-operator-role
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["pods/log"]
+  verbs: ["get"]
+- apiGroups: [""]
+  resources: ["services", "persistentvolumes"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["ingresses"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "statefulsets", "replicasets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["batch"]
+  resources: ["jobs", "cronjobs"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dashboard-pod-operator-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: dashboard-pod-operator-role
+subjects:
+- kind: ServiceAccount
+  name: dashboard-pod-operator
+  namespace: kubernetes-dashboard
+
+# ---------------------------------------------------------------------------
+# Tier 3: pod-deleter (default for everyone else on the company email
+# domain) — can see and delete pods, nothing else.
+# ---------------------------------------------------------------------------
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dashboard-pod-deleter
+  namespace: kubernetes-dashboard
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dashboard-pod-deleter-token
+  namespace: kubernetes-dashboard
+  annotations:
+    kubernetes.io/service-account.name: dashboard-pod-deleter
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dashboard-pod-deleter-role
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dashboard-pod-deleter-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: dashboard-pod-deleter-role
+subjects:
+- kind: ServiceAccount
+  name: dashboard-pod-deleter
+  namespace: kubernetes-dashboard
+
+# ---------------------------------------------------------------------------
+# dashboard-auth-injector: sits between nginx's auth-url check and
+# oauth2-proxy. Not an Ingress resource, so ingress-nginx's
+# "no configuration-snippet" admission policy doesn't apply at all.
 #
-# Flow: nginx ingress -> this service's /auth -> (internally) oauth2-proxy's
-# /oauth2/auth, reusing its existing email-allowlist check. If oauth2-proxy
-# says yes (2xx), this response also carries a fixed
-# "Authorization: Bearer <static SA token>" header. nginx-ingress's
-# auth-response-headers annotation (a plain annotation, not a snippet) then
-# copies that header into the request it forwards to the real Dashboard
-# backend — same mechanism as before, just a static token instead of each
-# user's own expiring one.
+# A single plain-nginx "add_header a static token" (the pre-2026-11 version
+# of this file) can't do claim-based routing — picking a token based on a
+# custom "dept_id" JWT claim needs actual JWT decoding and conditional logic,
+# which stock nginx directives can't express. So this is now a small
+# stdlib-only Python service instead (no pip installs, no custom image build
+# — just the official python:3.12-alpine image running a script mounted from
+# a ConfigMap).
+#
+# Flow per request to /auth:
+#   1. Forward the browser's Cookie header to oauth2-proxy's /oauth2/auth
+#      (reusing its existing login-gate / session check).
+#   2. If oauth2-proxy says no (non-2xx) -> return 401 (nginx's auth-signin
+#      still redirects to login, same as before).
+#   3. If yes, oauth2-proxy's response also carries
+#      "Authorization: Bearer <the real Keycloak ID token>" (set by
+#      --set-authorization-header=true in 01-oauth2proxy.yaml). Decode that
+#      JWT's payload (no signature re-verification — oauth2-proxy already
+#      validated it; we're only reading claims to pick a tier, not making a
+#      trust decision on our own) to get "email" and "dept_id".
+#   4. Pick the static token for the matching tier and return it as this
+#      response's own Authorization header. nginx's auth-response-headers
+#      annotation (a plain annotation, not a snippet) copies that into the
+#      request forwarded to the real Dashboard backend.
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: dashboard-auth-injector-conf
+  name: dashboard-auth-injector-script
   namespace: kubernetes-dashboard
 data:
-  default.conf.template: |
-    server {
-      listen 8080;
+  server.py: |
+    import base64
+    import http.client
+    import json
+    import os
+    import sys
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-      location = /auth {
-        proxy_pass http://oauth2-proxy.kubernetes-dashboard.svc.cluster.local:4180/oauth2/auth;
-        proxy_pass_request_body off;
-        proxy_set_header Content-Length "";
-        proxy_set_header X-Original-URI $request_uri;
-        # oauth2-proxy returns 202 (not 200) on a successful /oauth2/auth
-        # check. nginx's add_header only applies to a specific status
-        # allowlist by default (200/201/204/206/301-304/307) — 202 isn't on
-        # it, so without "always" this header was silently dropped on every
-        # successful check, which is exactly the failure mode we want to
-        # avoid. "always" also adds it on the 401 failure path, but that's
-        # harmless here: auth_request discards this subrequest's body/headers
-        # on failure before anything reaches the actual client, and nginx
-        # never proxies to the real Dashboard backend in that case either.
-        add_header Authorization "Bearer ${STATIC_TOKEN}" always;
-      }
-    }
+    OAUTH2_PROXY_HOST = "oauth2-proxy.kubernetes-dashboard.svc.cluster.local"
+    OAUTH2_PROXY_PORT = 4180
 
+    def _split_csv(value):
+        return {v.strip() for v in value.split(",") if v.strip()}
+
+    ADMIN_EMAILS = {e.lower() for e in _split_csv(os.environ.get("ADMIN_EMAILS", ""))}
+    POD_OPERATOR_DEPT_IDS = _split_csv(os.environ.get("POD_OPERATOR_DEPT_IDS", ""))
+
+    ADMIN_TOKEN = os.environ["ADMIN_TOKEN"]
+    POD_OPERATOR_TOKEN = os.environ["POD_OPERATOR_TOKEN"]
+    POD_DELETER_TOKEN = os.environ["POD_DELETER_TOKEN"]
+
+    def decode_jwt_payload(token):
+        try:
+            payload_b64 = token.split(".")[1]
+            padded = payload_b64 + "=" * (-len(payload_b64) % 4)
+            return json.loads(base64.urlsafe_b64decode(padded))
+        except Exception:
+            return {}
+
+    def pick_static_token(claims):
+        email = str(claims.get("email", "")).strip().lower()
+        dept_id = str(claims.get("dept_id", "")).strip()
+        if email in ADMIN_EMAILS:
+            return ADMIN_TOKEN
+        if dept_id in POD_OPERATOR_DEPT_IDS:
+            return POD_OPERATOR_TOKEN
+        return POD_DELETER_TOKEN
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path.split("?", 1)[0] != "/auth":
+                self.send_response(404)
+                self.end_headers()
+                return
+
+            cookie = self.headers.get("Cookie", "")
+            try:
+                conn = http.client.HTTPConnection(OAUTH2_PROXY_HOST, OAUTH2_PROXY_PORT, timeout=5)
+                conn.request("GET", "/oauth2/auth", headers={"Cookie": cookie})
+                resp = conn.getresponse()
+                status = resp.status
+                auth_header = resp.getheader("Authorization")
+                resp.read()
+                conn.close()
+            except Exception as exc:
+                sys.stderr.write(f"error calling oauth2-proxy: {exc}\n")
+                status, auth_header = 401, None
+
+            if not (200 <= status < 300) or not auth_header:
+                self.send_response(401)
+                self.end_headers()
+                return
+
+            token = auth_header.split(" ", 1)[-1]
+            claims = decode_jwt_payload(token)
+            static_token = pick_static_token(claims)
+
+            self.send_response(200)
+            self.send_header("Authorization", f"Bearer {static_token}")
+            self.end_headers()
+
+        def log_message(self, fmt, *args):
+            sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
+
+    if __name__ == "__main__":
+        ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -100,29 +277,43 @@ spec:
         app: dashboard-auth-injector
     spec:
       containers:
-      - name: nginx
-        image: nginx:1.27-alpine
-        # The official nginx image auto-renders *.template files in this dir
-        # with envsubst, substituting only variables that exist in the
-        # container's own environment (i.e. just ${STATIC_TOKEN} below) —
-        # nginx's own runtime $variables (like $request_uri) are untouched
-        # since they aren't real env vars at container-start time.
+      - name: injector
+        image: python:3.12-alpine
+        command: ["python3", "/app/server.py"]
         env:
-        - name: STATIC_TOKEN
+        # Comma-separated. Replace the domain with the company's real one —
+        # these must match the "email" claim in the Keycloak ID token
+        # exactly (case-insensitive).
+        - name: ADMIN_EMAILS
+          value: "yhlinbl@REPLACE_WITH_COMPANY_DOMAIN,jhling@REPLACE_WITH_COMPANY_DOMAIN,ychang@REPLACE_WITH_COMPANY_DOMAIN"
+        # Comma-separated department IDs, matched against the "dept_id"
+        # claim Keycloak puts in the ID token.
+        - name: POD_OPERATOR_DEPT_IDS
+          value: "0021003,0021004"
+        - name: ADMIN_TOKEN
           valueFrom:
             secretKeyRef:
               name: dashboard-static-admin-token
               key: token
+        - name: POD_OPERATOR_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: dashboard-pod-operator-token
+              key: token
+        - name: POD_DELETER_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: dashboard-pod-deleter-token
+              key: token
         ports:
         - containerPort: 8080
         volumeMounts:
-        - name: conf-template
-          mountPath: /etc/nginx/templates
+        - name: script
+          mountPath: /app
       volumes:
-      - name: conf-template
+      - name: script
         configMap:
-          name: dashboard-auth-injector-conf
-
+          name: dashboard-auth-injector-script
 ---
 apiVersion: v1
 kind: Service
