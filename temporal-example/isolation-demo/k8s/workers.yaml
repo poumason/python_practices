@@ -1,0 +1,119 @@
+# 三種 workflow = 三個 Deployment（同一個 image，用 WORKER_ROLE 區分）。
+# 需要替換的值：image、TEMPORAL_ADDRESS、TEMPORAL_NAMESPACE、Secret 名稱、資源數字。
+#
+# 隔離重點：
+#   chat       -> 資源保證（requests == limits）、HPA、PDB：保護使用者互動延遲
+#   golden     -> 批次：低並行、可縮到 0、不吃保證資源
+#   simulation -> 批次：低並行、使用「測試專用」LiteLLM key
+# Worker 與 queue 隔離不會隔離 Temporal Server / DB / LiteLLM / vLLM，
+# 所以另外用 LiteLLM 的 virtual key 對 golden / simulation 設 rate limit 與預算。
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-worker-chat
+  labels: { app: temporal-worker, role: chat }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: temporal-worker, role: chat }
+  template:
+    metadata:
+      labels: { app: temporal-worker, role: chat }
+    spec:
+      terminationGracePeriodSeconds: 60   # > GRACEFUL_SHUTDOWN_SECONDS，讓進行中的 activity 收尾
+      containers:
+        - name: worker
+          image: your-registry/temporal-isolation-demo:0.1.0
+          env:
+            - { name: WORKER_ROLE, value: chat }
+            - { name: TEMPORAL_ADDRESS, value: temporal-frontend.temporal.svc:7233 }
+            - { name: TEMPORAL_NAMESPACE, value: default }
+            - { name: MAX_CONCURRENT_ACTIVITIES, value: "100" }
+            - { name: GRACEFUL_SHUTDOWN_SECONDS, value: "30" }
+            - name: LITELLM_API_KEY            # chat 專用 virtual key
+              valueFrom: { secretKeyRef: { name: litellm-chat-key, key: key } }
+          resources:
+            requests: { cpu: "500m", memory: 1Gi }
+            limits:   { cpu: "1",    memory: 1Gi }   # memory request == limit
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: temporal-worker-chat
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: temporal-worker-chat }
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: temporal-worker-chat
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: temporal-worker, role: chat }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-worker-golden
+  labels: { app: temporal-worker, role: golden }
+spec:
+  replicas: 1            # 沒有批次要跑時可手動 / 用 KEDA 縮到 0
+  selector:
+    matchLabels: { app: temporal-worker, role: golden }
+  template:
+    metadata:
+      labels: { app: temporal-worker, role: golden }
+    spec:
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: worker
+          image: your-registry/temporal-isolation-demo:0.1.0
+          env:
+            - { name: WORKER_ROLE, value: golden }
+            - { name: TEMPORAL_ADDRESS, value: temporal-frontend.temporal.svc:7233 }
+            - { name: TEMPORAL_NAMESPACE, value: default }   # retention 需求不同時改成獨立 namespace
+            - { name: MAX_CONCURRENT_ACTIVITIES, value: "5" }  # 壓低並行，保護資料來源與 LLM
+            - { name: GRACEFUL_SHUTDOWN_SECONDS, value: "90" }
+            - { name: DEMO_DATA_DIR, value: /data }            # 正式環境改成 object storage 設定
+            - name: LITELLM_API_KEY            # batch 專用 key（有 rate limit / 預算）
+              valueFrom: { secretKeyRef: { name: litellm-batch-key, key: key } }
+          resources:
+            requests: { cpu: "250m", memory: 512Mi }
+            limits:   { cpu: "2",    memory: 2Gi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-worker-simulation
+  labels: { app: temporal-worker, role: simulation }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: temporal-worker, role: simulation }
+  template:
+    metadata:
+      labels: { app: temporal-worker, role: simulation }
+    spec:
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: worker
+          image: your-registry/temporal-isolation-demo:0.1.0
+          env:
+            - { name: WORKER_ROLE, value: simulation }
+            - { name: TEMPORAL_ADDRESS, value: temporal-frontend.temporal.svc:7233 }
+            - { name: TEMPORAL_NAMESPACE, value: default }
+            - { name: MAX_CONCURRENT_ACTIVITIES, value: "3" }
+            - { name: GRACEFUL_SHUTDOWN_SECONDS, value: "90" }
+            - { name: DEMO_DATA_DIR, value: /data }
+            - name: LITELLM_API_KEY            # 模擬測試專用 key
+              valueFrom: { secretKeyRef: { name: litellm-sim-key, key: key } }
+          resources:
+            requests: { cpu: "250m", memory: 512Mi }
+            limits:   { cpu: "2",    memory: 2Gi }
